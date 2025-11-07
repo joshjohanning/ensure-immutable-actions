@@ -127,6 +127,10 @@ describe('Ensure Immutable Actions', () => {
       expect(shouldExcludeAction('github')).toBe(true);
     });
 
+    test('should exclude octokit organization', () => {
+      expect(shouldExcludeAction('octokit')).toBe(true);
+    });
+
     test('should not exclude other organizations', () => {
       expect(shouldExcludeAction('joshjohanning')).toBe(false);
       expect(shouldExcludeAction('microsoft')).toBe(false);

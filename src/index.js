@@ -83,12 +83,12 @@ export function parseActionReference(uses) {
 }
 
 /**
- * Check if an action should be excluded from checks (GitHub and actions orgs)
+ * Check if an action should be excluded from checks (organizations that already publish immutable releases)
  * @param {string} owner - Action owner
  * @returns {boolean} True if should be excluded
  */
 export function shouldExcludeAction(owner) {
-  return owner === 'actions' || owner === 'github';
+  return owner === 'actions' || owner === 'github' || owner === 'octokit';
 }
 
 /**
