@@ -280,6 +280,9 @@ export async function run() {
     const failOnMutable = getBooleanInput('fail-on-mutable');
     const workflowsInput = getInput('workflows');
     const excludeWorkflowsInput = getInput('exclude-workflows');
+    // Note: check-reusable-workflows is read for logging but all .yml/.yaml files
+    // in .github/workflows are checked by default (reusable workflows are just
+    // regular workflow files that can be called from other workflows)
     const checkReusableWorkflows = getBooleanInput('check-reusable-workflows');
 
     if (!githubToken) {
