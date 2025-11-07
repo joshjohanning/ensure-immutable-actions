@@ -11,7 +11,7 @@ A GitHub Action that validates third-party actions in your workflows are using i
 
 ## What it does
 
-This action scans your workflow files and ensures that all third-party actions (excluding `actions/*` and `github/*` organizations) are referencing immutable releases. This prevents supply chain attacks where a release could be modified after you've started using it.
+This action scans your workflow files and ensures that all third-party actions (excluding `actions/*`, `github/*`, and `octokit/*` organizations which already publish immutable releases) are referencing immutable releases. This prevents supply chain attacks where a release could be modified after you've started using it.
 
 ## Usage
 
@@ -110,13 +110,23 @@ jobs:
 
 1. **Scans Workflows**: Reads all workflow files (or specified ones) from `.github/workflows/`
 2. **Extracts Actions**: Parses YAML to find all `uses:` references to third-party actions
-3. **Filters**: Excludes `actions/*` and `github/*` organizations (official GitHub actions)
+3. **Filters**: Excludes `actions/*`, `github/*`, and `octokit/*` organizations (these already publish immutable releases)
 4. **Checks Immutability**: For each third-party action:
-   - Attempts to fetch the release via GitHub API
+   - **Full 40-character SHA references** (e.g., `user/action@abc123...def`) are considered inherently immutable (no API check needed)
+   - For tag/branch references, attempts to fetch the release via GitHub API
    - Checks the `immutable` property of the release
-   - Reports actions without releases as mutable (e.g., major tags like `v3`)
+   - Reports actions without releases as mutable (e.g., major tags like `v3`, non-immutable SemVer releases, and branch references)
 5. **Reports Results**: Creates a summary with all findings
 6. **Optionally Fails**: If `fail-on-mutable` is true, fails the workflow when mutable actions are found
+
+## What's Considered Immutable?
+
+- ✅ **Full 40-character SHA**: `user/action@1234567890abcdef1234567890abcdef12345678` - Cryptographic hash that cannot change
+- ✅ **Immutable release tags**: Release tags that have been marked as immutable via GitHub API
+- ✅ **Actions from trusted organizations**: `actions/*`, `github/*`, and `octokit/*` organizations [already publish immutable releases](https://github.com/github/codeql/blob/main/actions/ql/extensions/immutable-actions-list/ext/immutable_actions.yml) and are excluded from checks
+- ❌ **Mutable release tags**: Release tags that can still be modified or deleted
+- ❌ **Branch references**: `user/action@main` - Branches are always mutable
+- ❌ **Major version tags**: `user/action@v1` - Typically don't have releases, can be moved
 
 ## What are Immutable Releases?
 
