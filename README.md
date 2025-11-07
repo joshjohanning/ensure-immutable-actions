@@ -20,18 +20,17 @@ This action scans your workflow files and ensures that all third-party actions (
 ```yaml
 name: Check Action Immutability
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/**'
   push:
-    branches:
-      - main
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
   check-immutable:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Ensure immutable actions
         uses: joshjohanning/ensure-immutable-actions@v1
