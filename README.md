@@ -120,12 +120,21 @@ jobs:
 
 ## What are Immutable Releases?
 
-Immutable releases are GitHub releases that cannot be modified or deleted after creation. This is a security feature that helps prevent supply chain attacks where an attacker could modify a release that your workflows depend on.
+Immutable releases are GitHub releases that have been marked with an `immutable` flag, indicating they cannot be modified or deleted. This is a GitHub feature that helps prevent supply chain attacks where an attacker could modify a release that your workflows depend on.
 
-Actions using major version tags (like `v3`) or branch names typically don't have releases and are considered mutable since the underlying code can change. It's recommended to:
+When checking actions:
+
+- **Tags with immutable releases**: ✅ Most secure - the release content cannot be changed
+- **Tags with mutable releases**: ⚠️ Release exists but could be modified
+- **Tags without releases**: ❌ No release found - typical for major version tags like `v3`
+- **Commit SHAs**: ⚠️ No releases (SHAs are inherently immutable in Git)
+- **Branch names**: ❌ Not recommended - content can change
+
+**Best practices for supply chain security:**
 
 1. Use specific release tags (e.g., `v1.2.3`) with immutable releases
 2. Or use commit SHAs (e.g., `abc123def456...`) for maximum security
+3. Avoid major version tags (like `v3`) as they typically don't have releases and point to mutable branches
 
 ## Development
 

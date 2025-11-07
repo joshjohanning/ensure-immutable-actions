@@ -185,15 +185,18 @@ export function getWorkflowFiles(workflowsInput, excludeWorkflowsInput, workspac
 
 /**
  * Check if a release is immutable via GitHub API
+ * Note: The 'immutable' property is a GitHub feature that indicates whether a release
+ * can be modified or deleted. This only applies to tag-based releases.
  * @param {Octokit} octokit - Octokit instance
  * @param {string} owner - Repository owner
  * @param {string} repo - Repository name
- * @param {string} ref - Git ref (tag, SHA, branch)
+ * @param {string} ref - Git ref (tag, SHA, branch) - only tags can have releases
  * @returns {Promise<Object>} { immutable: boolean, releaseFound: boolean, message: string }
  */
 export async function checkReleaseImmutability(octokit, owner, repo, ref) {
   try {
     // Try to get release by tag
+    // Note: getReleaseByTag only works with tag names, not SHAs or branches
     const { data: release } = await octokit.rest.repos.getReleaseByTag({
       owner,
       repo,
@@ -201,6 +204,8 @@ export async function checkReleaseImmutability(octokit, owner, repo, ref) {
     });
 
     // Check if immutable property exists and is true
+    // The 'immutable' property is returned by the GitHub API when a release
+    // has been marked as immutable (cannot be modified or deleted)
     const isImmutable = release.immutable === true;
 
     return {
@@ -211,6 +216,7 @@ export async function checkReleaseImmutability(octokit, owner, repo, ref) {
   } catch (error) {
     if (error.status === 404) {
       // No release found for this tag
+      // This is expected for: commit SHAs, branch names, or tags without releases
       return {
         immutable: false,
         releaseFound: false,

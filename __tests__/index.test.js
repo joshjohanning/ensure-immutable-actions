@@ -529,6 +529,8 @@ jobs:
 
     test('should fail when github-token is not provided', async () => {
       mockCore.getInput.mockReturnValue('');
+      // Clear environment variable to ensure no fallback
+      delete process.env.INPUT_GITHUB_TOKEN;
 
       await run();
 
