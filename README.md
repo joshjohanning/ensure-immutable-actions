@@ -34,8 +34,6 @@ jobs:
 
       - name: Ensure immutable actions
         uses: joshjohanning/ensure-immutable-actions@v1
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
 ### Check specific workflows only
@@ -44,7 +42,6 @@ jobs:
 - name: Ensure immutable actions
   uses: joshjohanning/ensure-immutable-actions@v1
   with:
-    github-token: ${{ secrets.GITHUB_TOKEN }}
     workflows: 'ci.yml,deploy.yml,release.yml'
 ```
 
@@ -54,18 +51,17 @@ jobs:
 - name: Ensure immutable actions
   uses: joshjohanning/ensure-immutable-actions@v1
   with:
-    github-token: ${{ secrets.GITHUB_TOKEN }}
     exclude-workflows: 'experimental.yml,temp-workflow.yml'
 ```
 
 ## Inputs
 
-| Input               | Description                                                                                                                                        | Required | Default       |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------------- |
-| `github-token`      | GitHub token for API calls                                                                                                                         | Yes      | -             |
-| `fail-on-mutable`   | Fail the workflow if mutable actions are found                                                                                                     | No       | `true`        |
-| `workflows`         | Specific workflow files to check (comma-separated, e.g., `ci.yml,deploy.yml`). **If not specified, checks ALL workflows in `.github/workflows/`.** | No       | All workflows |
-| `exclude-workflows` | Workflow files to exclude from checks (comma-separated). Only applies when `workflows` is not specified.                                           | No       | -             |
+| Input               | Description                                                                                                                                        | Required | Default               |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | --------------------- |
+| `github-token`      | GitHub token for API calls                                                                                                                         | Yes      | `${{ github.token }}` |
+| `fail-on-mutable`   | Fail the workflow if mutable actions are found                                                                                                     | No       | `true`                |
+| `workflows`         | Specific workflow files to check (comma-separated, e.g., `ci.yml,deploy.yml`). **If not specified, checks ALL workflows in `.github/workflows/`.** | No       | All workflows         |
+| `exclude-workflows` | Workflow files to exclude from checks (comma-separated). Only applies when workflows are not specified.                                            | No       | -                     |
 
 ## Outputs
 
@@ -83,7 +79,6 @@ jobs:
 ```yaml
 - uses: joshjohanning/ensure-immutable-actions@v1
   with:
-    github-token: ${{ secrets.GITHUB_TOKEN }}
     fail-on-mutable: true # This is the default
 ```
 
@@ -92,7 +87,6 @@ jobs:
 ```yaml
 - uses: joshjohanning/ensure-immutable-actions@v1
   with:
-    github-token: ${{ secrets.GITHUB_TOKEN }}
     fail-on-mutable: false
 ```
 
@@ -101,7 +95,6 @@ jobs:
 ```yaml
 - uses: joshjohanning/ensure-immutable-actions@v1
   with:
-    github-token: ${{ secrets.GITHUB_TOKEN }}
     workflows: 'ci.yml,cd.yml,build.yml'
 ```
 
