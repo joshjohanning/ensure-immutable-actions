@@ -1,93 +1,141 @@
-# nodejs-actions-starter-template
+# ensure-immutable-actions
 
-[![GitHub release](https://img.shields.io/github/release/joshjohanning/nodejs-actions-starter-template.svg?logo=github&labelColor=333)](https://github.com/joshjohanning/nodejs-actions-starter-template/releases)
-[![GitHub marketplace](https://img.shields.io/badge/marketplace-NodeJS%20Actions%20Starter%20Template-blue?logo=github&labelColor=333)](https://github.com/marketplace/actions/nodejs-actions-starter-template)
-[![CI](https://github.com/joshjohanning/nodejs-actions-starter-template/actions/workflows/ci.yml/badge.svg)](https://github.com/joshjohanning/nodejs-actions-starter-template/actions/workflows/ci.yml)
-[![Publish GitHub Action](https://github.com/joshjohanning/nodejs-actions-starter-template/actions/workflows/publish.yml/badge.svg)](https://github.com/joshjohanning/nodejs-actions-starter-template/actions/workflows/publish.yml)
+[![GitHub release](https://img.shields.io/github/release/joshjohanning/ensure-immutable-actions.svg?logo=github&labelColor=333)](https://github.com/joshjohanning/ensure-immutable-actions/releases)
+[![GitHub marketplace](https://img.shields.io/badge/marketplace-Ensure%20Immutable%20Actions-blue?logo=github&labelColor=333)](https://github.com/marketplace/actions/ensure-immutable-actions)
+[![CI](https://github.com/joshjohanning/ensure-immutable-actions/actions/workflows/ci.yml/badge.svg)](https://github.com/joshjohanning/ensure-immutable-actions/actions/workflows/ci.yml)
+[![Publish GitHub Action](https://github.com/joshjohanning/ensure-immutable-actions/actions/workflows/publish.yml/badge.svg)](https://github.com/joshjohanning/ensure-immutable-actions/actions/workflows/publish.yml)
 ![Coverage](./badges/coverage.svg)
 
-👋 Starter template with the action layout, linting, CI, and publishing pre-configured
+A GitHub Action that validates third-party actions in your workflows are using immutable releases, enhancing supply chain security.
 
-A complete GitHub Action starter template that includes:
+## What it does
 
-- ✅ Action boilerplate with inputs/outputs
-- ✅ ESLint configuration for code quality
-- ✅ Jest testing framework with sample tests
-- ✅ GitHub Actions CI/CD workflow
-- ✅ Automated bundling with ncc
-- ✅ Example implementation that works out of the box
-- ✅ GitHub REST API integration with Octokit
-- ✅ Repository statistics fetching example
+This action scans your workflow files and ensures that all third-party actions (excluding `actions/*` and `github/*` organizations) are referencing immutable releases. This prevents supply chain attacks where a release could be modified after you've started using it.
 
-## Getting Started
+## Usage
 
-### 1. Use This Template
+### Check all workflows (default)
 
-1. Click "Use this template" to create a new repository
-2. Clone your new repository locally
-3. Run `npm install` to install dependencies
+```yaml
+name: Check Action Immutability
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+  push:
+    branches:
+      - main
 
-### 2. Customize Your Action
+jobs:
+  check-immutable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-📋 **See [TEMPLATE_CHECKLIST_DELETE_ME.md](./TEMPLATE_CHECKLIST_DELETE_ME.md) for a comprehensive customization guide**
-
-1. Update `package.json` with your action name and details
-2. Update `action.yml` with your action's inputs and outputs
-3. Modify `src/index.js` with your action logic
-4. Update this README with your action's documentation
-5. Update the publish workflow if needed
-
-### 3. Test Your Action
-
-```bash
-npm test              # Run tests
-npm run lint          # Check code quality with ESLint
-npm run format:write  # Run Prettier for formatting
-npm run coverage      # Generate coverage badge
-npm run package       # Bundle for distribution
-npm run all           # Alternatively: Run format, lint, test, coverage, and package
+      - name: Ensure immutable actions
+        uses: joshjohanning/ensure-immutable-actions@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-## Example Usage
+### Check specific workflows only
 
-```yml
-- name: Hello World Action
-  uses: your-username/your-action-name@v1
+```yaml
+- name: Ensure immutable actions
+  uses: joshjohanning/ensure-immutable-actions@v1
   with:
-    who-to-greet: 'World'
-    include-time: true
-    message-prefix: 'Hello'
-    github-token: ${{ secrets.GITHUB_TOKEN }} # Optional: for repo stats
+    github-token: ${{ secrets.GITHUB_TOKEN }}
+    workflows: 'ci.yml,deploy.yml,release.yml'
 ```
 
-## Action Inputs
+### Check all except certain workflows
 
-| Input            | Description                                      | Required | Default   |
-| ---------------- | ------------------------------------------------ | -------- | --------- |
-| `who-to-greet`   | Who to greet in the message                      | No       | `'World'` |
-| `include-time`   | Whether to include current time in output        | No       | `false`   |
-| `message-prefix` | Prefix for the greeting message                  | No       | `'Hello'` |
-| `github-token`   | GitHub token for API access (enables repo stats) | No       | -         |
+```yaml
+- name: Ensure immutable actions
+  uses: joshjohanning/ensure-immutable-actions@v1
+  with:
+    github-token: ${{ secrets.GITHUB_TOKEN }}
+    exclude-workflows: 'experimental.yml,temp-workflow.yml'
+```
 
-## Action Outputs
+## Inputs
 
-| Output       | Description                                    |
-| ------------ | ---------------------------------------------- |
-| `message`    | The generated greeting                         |
-| `time`       | Current timestamp (if requested)               |
-| `repo-stats` | Repository statistics JSON (if token provided) |
+| Input                      | Description                                                                                                                                        | Required | Default       |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------------- |
+| `github-token`             | GitHub token for API calls                                                                                                                         | Yes      | -             |
+| `fail-on-mutable`          | Fail the workflow if mutable actions are found                                                                                                     | No       | `true`        |
+| `workflows`                | Specific workflow files to check (comma-separated, e.g., `ci.yml,deploy.yml`). **If not specified, checks ALL workflows in `.github/workflows/`.** | No       | All workflows |
+| `exclude-workflows`        | Workflow files to exclude from checks (comma-separated). Only applies when `workflows` is not specified.                                           | No       | -             |
+| `check-reusable-workflows` | Also check reusable workflow files in `.github/workflows`                                                                                          | No       | `true`        |
+
+## Outputs
+
+| Output              | Description                                    |
+| ------------------- | ---------------------------------------------- |
+| `mutable-actions`   | JSON array of actions using mutable releases   |
+| `immutable-actions` | JSON array of actions using immutable releases |
+| `all-passed`        | Boolean indicating if all checks passed        |
+| `workflows-checked` | List of workflow files that were checked       |
+
+## Examples
+
+### Fail on any mutable action
+
+```yaml
+- uses: joshjohanning/ensure-immutable-actions@v1
+  with:
+    github-token: ${{ secrets.GITHUB_TOKEN }}
+    fail-on-mutable: true # This is the default
+```
+
+### Report only (don't fail)
+
+```yaml
+- uses: joshjohanning/ensure-immutable-actions@v1
+  with:
+    github-token: ${{ secrets.GITHUB_TOKEN }}
+    fail-on-mutable: false
+```
+
+### Check only CI/CD workflows
+
+```yaml
+- uses: joshjohanning/ensure-immutable-actions@v1
+  with:
+    github-token: ${{ secrets.GITHUB_TOKEN }}
+    workflows: 'ci.yml,cd.yml,build.yml'
+```
+
+## How it Works
+
+1. **Scans Workflows**: Reads all workflow files (or specified ones) from `.github/workflows/`
+2. **Extracts Actions**: Parses YAML to find all `uses:` references to third-party actions
+3. **Filters**: Excludes `actions/*` and `github/*` organizations (official GitHub actions)
+4. **Checks Immutability**: For each third-party action:
+   - Attempts to fetch the release via GitHub API
+   - Checks the `immutable` property of the release
+   - Reports actions without releases as mutable (e.g., major tags like `v3`)
+5. **Reports Results**: Creates a summary with all findings
+6. **Optionally Fails**: If `fail-on-mutable` is true, fails the workflow when mutable actions are found
+
+## What are Immutable Releases?
+
+Immutable releases are GitHub releases that cannot be modified or deleted after creation. This is a security feature that helps prevent supply chain attacks where an attacker could modify a release that your workflows depend on.
+
+Actions using major version tags (like `v3`) or branch names typically don't have releases and are considered mutable since the underlying code can change. It's recommended to:
+
+1. Use specific release tags (e.g., `v1.2.3`) with immutable releases
+2. Or use commit SHAs (e.g., `abc123def456...`) for maximum security
 
 ## Development
 
-This template includes everything you need to start developing GitHub Actions:
+### Setup
 
-### Development Setup
-
-1. Clone this repository
-2. Install dependencies: `npm install`
-3. Make your changes to `src/index.js`
-4. Run tests: `npm test`
-5. Build the action: `npm run package`
+```bash
+git clone https://github.com/joshjohanning/ensure-immutable-actions.git
+cd ensure-immutable-actions
+npm install
+```
 
 ### Available Scripts
 
@@ -102,21 +150,13 @@ This template includes everything you need to start developing GitHub Actions:
 You can test the action locally by setting environment variables:
 
 ```bash
-export INPUT_WHO_TO_GREET="Local Dev"
-export INPUT_INCLUDE_TIME="true"
-export INPUT_MESSAGE_PREFIX="Hey"
+export INPUT_GITHUB_TOKEN="ghp_your_token_here"
+export INPUT_FAIL_ON_MUTABLE="true"
+export INPUT_WORKFLOWS="ci.yml"
+export GITHUB_WORKSPACE="/path/to/your/repo"
 node src/index.js
 ```
 
-### Project Structure
+## License
 
-```text
-├── src/
-│   └── index.js          # Main action code
-├── __tests__/
-│   └── index.test.js     # Jest tests
-├── dist/                 # Bundled action (generated)
-├── action.yml           # Action metadata
-├── package.json         # Dependencies and scripts
-└── README.md           # This file
-```
+MIT - See [LICENSE](LICENSE) for details

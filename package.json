@@ -1,7 +1,7 @@
 {
-  "name": "nodejs-actions-starter-template",
-  "description": "👋 A starter template for creating GitHub Actions with Node.js",
-  "version": "1.0.4",
+  "name": "ensure-immutable-actions",
+  "description": "Validates third-party actions in your workflows are using immutable releases",
+  "version": "1.0.0",
   "type": "module",
   "author": {
     "name": "Josh Johanning",
@@ -9,20 +9,20 @@
     "url": "https://github.com/joshjohanning"
   },
   "private": true,
-  "homepage": "https://github.com/joshjohanning/nodejs-actions-starter-template#readme",
+  "homepage": "https://github.com/joshjohanning/ensure-immutable-actions#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/joshjohanning/nodejs-actions-starter-template.git"
+    "url": "git+https://github.com/joshjohanning/ensure-immutable-actions.git"
   },
   "bugs": {
-    "url": "https://github.com/joshjohanning/nodejs-actions-starter-template/issues"
+    "url": "https://github.com/joshjohanning/ensure-immutable-actions/issues"
   },
   "keywords": [
     "github-actions",
-    "template",
-    "starter",
-    "nodejs",
-    "hello-world"
+    "security",
+    "supply-chain",
+    "immutable",
+    "releases"
   ],
   "exports": {
     ".": "./dist/index.js"
@@ -46,7 +46,8 @@
   "dependencies": {
     "@actions/core": "^1.11.1",
     "@actions/github": "^6.0.1",
-    "@octokit/rest": "^22.0.1"
+    "@octokit/rest": "^22.0.1",
+    "yaml": "^2.8.1"
   },
   "devDependencies": {
     "@joshjohanning/make-coverage-badge-better": "^1.0.1",
