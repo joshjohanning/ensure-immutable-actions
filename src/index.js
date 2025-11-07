@@ -183,6 +183,15 @@ export function getWorkflowFiles(workflowsInput, excludeWorkflowsInput, workspac
 }
 
 /**
+ * Check if a reference is a full 40-character SHA
+ * @param {string} ref - Git ref to check
+ * @returns {boolean} True if ref is a 40-char SHA
+ */
+export function isFullSHA(ref) {
+  return /^[a-f0-9]{40}$/i.test(ref);
+}
+
+/**
  * Check if a release is immutable via GitHub API
  * Note: The 'immutable' property is a GitHub feature that indicates whether a release
  * can be modified or deleted. This only applies to tag-based releases.
@@ -193,6 +202,15 @@ export function getWorkflowFiles(workflowsInput, excludeWorkflowsInput, workspac
  * @returns {Promise<Object>} { immutable: boolean, releaseFound: boolean, message: string }
  */
 export async function checkReleaseImmutability(octokit, owner, repo, ref) {
+  // Full 40-char SHAs are inherently immutable (cryptographic hash can't change)
+  if (isFullSHA(ref)) {
+    return {
+      immutable: true,
+      releaseFound: false,
+      message: 'Immutable (full SHA reference)'
+    };
+  }
+
   try {
     // Try to get release by tag
     // Note: getReleaseByTag only works with tag names, not SHAs or branches

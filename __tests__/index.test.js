@@ -48,7 +48,8 @@ const {
   checkReleaseImmutability,
   checkAllActions,
   getInput,
-  getBooleanInput
+  getBooleanInput,
+  isFullSHA
 } = await import('../src/index.js');
 
 describe('Ensure Immutable Actions', () => {
@@ -91,9 +92,7 @@ describe('Ensure Immutable Actions', () => {
 
     test('should parse action with full 40-char SHA reference', () => {
       // GitHub Actions requires full 40-char SHA for commit references
-      const result = parseActionReference(
-        'actions/checkout@1234567890abcdef1234567890abcdef12345678'
-      );
+      const result = parseActionReference('actions/checkout@1234567890abcdef1234567890abcdef12345678');
       expect(result).toEqual({
         owner: 'actions',
         repo: 'checkout',
@@ -277,7 +276,39 @@ jobs:
     });
   });
 
+  describe('isFullSHA', () => {
+    test('should return true for valid 40-char SHA', () => {
+      expect(isFullSHA('1234567890abcdef1234567890abcdef12345678')).toBe(true);
+      expect(isFullSHA('ABCDEF1234567890abcdef1234567890ABCDEF12')).toBe(true);
+    });
+
+    test('should return false for non-SHA references', () => {
+      expect(isFullSHA('v1.0.0')).toBe(false);
+      expect(isFullSHA('main')).toBe(false);
+      expect(isFullSHA('abc123')).toBe(false); // short SHA
+      expect(isFullSHA('1234567890abcdef1234567890abcdef1234567g')).toBe(false); // invalid char
+      expect(isFullSHA('1234567890abcdef1234567890abcdef123456')).toBe(false); // too short
+    });
+  });
+
   describe('checkReleaseImmutability', () => {
+    test('should return immutable true for full SHA references', async () => {
+      const result = await checkReleaseImmutability(
+        mockOctokit,
+        'owner',
+        'repo',
+        '1234567890abcdef1234567890abcdef12345678'
+      );
+
+      expect(result).toEqual({
+        immutable: true,
+        releaseFound: false,
+        message: 'Immutable (full SHA reference)'
+      });
+      // Should not call API for SHA references
+      expect(mockOctokit.rest.repos.getReleaseByTag).not.toHaveBeenCalled();
+    });
+
     test('should return immutable true for immutable release', async () => {
       mockOctokit.rest.repos.getReleaseByTag.mockResolvedValue({
         data: { immutable: true }
