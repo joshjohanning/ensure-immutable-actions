@@ -17,7 +17,7 @@ inputs:
     description: 'Specific workflow files to check (comma-separated, e.g., ci.yml,deploy.yml). If not specified, checks ALL workflows in .github/workflows/'
     required: false
   exclude-workflows:
-    description: 'Workflow files to exclude from checks (comma-separated). Only applies when workflows is not specified'
+    description: 'Workflow files to exclude from checks (comma-separated). Only applies when workflows are not specified'
     required: false
 
 outputs:
