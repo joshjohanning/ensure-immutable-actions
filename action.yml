@@ -19,11 +19,6 @@ inputs:
   exclude-workflows:
     description: 'Workflow files to exclude from checks (comma-separated). Only applies when workflows is not specified'
     required: false
-  check-reusable-workflows:
-    description: 'Also check reusable workflow files in .github/workflows'
-    required: false
-    default: 'true'
-
 outputs:
   mutable-actions:
     description: 'JSON array of actions using mutable releases'
