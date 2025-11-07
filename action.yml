@@ -19,6 +19,7 @@ inputs:
   exclude-workflows:
     description: 'Workflow files to exclude from checks (comma-separated). Only applies when workflows is not specified'
     required: false
+
 outputs:
   mutable-actions:
     description: 'JSON array of actions using mutable releases'

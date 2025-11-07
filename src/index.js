@@ -9,7 +9,6 @@
  *    export INPUT_FAIL_ON_MUTABLE="true"
  *    export INPUT_WORKFLOWS="ci.yml,deploy.yml"  # Optional: specific workflows
  *    export INPUT_EXCLUDE_WORKFLOWS="experimental.yml"  # Optional: workflows to exclude
- *    export INPUT_CHECK_REUSABLE_WORKFLOWS="true"
  *
  * 2. Set GitHub context environment variables:
  *    export GITHUB_REPOSITORY="owner/repo-name"
@@ -280,10 +279,6 @@ export async function run() {
     const failOnMutable = getBooleanInput('fail-on-mutable');
     const workflowsInput = getInput('workflows');
     const excludeWorkflowsInput = getInput('exclude-workflows');
-    // Note: check-reusable-workflows is read for logging but all .yml/.yaml files
-    // in .github/workflows are checked by default (reusable workflows are just
-    // regular workflow files that can be called from other workflows)
-    const checkReusableWorkflows = getBooleanInput('check-reusable-workflows');
 
     if (!githubToken) {
       core.setFailed('github-token is required');
@@ -292,7 +287,6 @@ export async function run() {
 
     core.info('Starting Ensure Immutable Actions...');
     core.info(`Fail on mutable: ${failOnMutable}`);
-    core.info(`Check reusable workflows: ${checkReusableWorkflows}`);
 
     // Get workspace directory
     const workspaceDir = process.env.GITHUB_WORKSPACE || process.cwd();

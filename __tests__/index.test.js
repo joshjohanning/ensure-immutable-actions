@@ -64,8 +64,7 @@ describe('Ensure Immutable Actions', () => {
         'github-token': 'test-token',
         'fail-on-mutable': 'true',
         workflows: '',
-        'exclude-workflows': '',
-        'check-reusable-workflows': 'true'
+        'exclude-workflows': ''
       };
       return inputs[name] || '';
     });
