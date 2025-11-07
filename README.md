@@ -61,7 +61,7 @@ jobs:
 | `github-token`      | GitHub token for API calls                                                                                                                         | Yes      | `${{ github.token }}` |
 | `fail-on-mutable`   | Fail the workflow if mutable actions are found                                                                                                     | No       | `true`                |
 | `workflows`         | Specific workflow files to check (comma-separated, e.g., `ci.yml,deploy.yml`). **If not specified, checks ALL workflows in `.github/workflows/`.** | No       | All workflows         |
-| `exclude-workflows` | Workflow files to exclude from checks (comma-separated). Only applies when workflows are not specified.                                            | No       | -                     |
+| `exclude-workflows` | Workflow files to exclude from checks (comma-separated). Only applies when `workflows` is not specified.                                            | No       | -                     |
 
 ## Outputs
 
