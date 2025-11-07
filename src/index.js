@@ -359,12 +359,7 @@ export async function run() {
     core.info(`Total actions to check: ${allActions.length}`);
 
     // Initialize Octokit
-    // Always use GitHub.com API to check action releases, even on GHES
-    // Third-party actions are (typically) hosted on GitHub.com, not on GHES instances
-    const octokit = new Octokit({
-      auth: githubToken,
-      baseUrl: 'https://api.github.com'
-    });
+    const octokit = new Octokit({ auth: githubToken });
 
     // Check all actions
     const { mutable, immutable } = await checkAllActions(octokit, allActions);

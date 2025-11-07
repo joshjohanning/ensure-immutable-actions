@@ -13,9 +13,6 @@ A GitHub Action that validates third-party actions in your workflows are using i
 
 This action scans your workflow files and ensures that all third-party actions (excluding `actions/*`, `github/*`, and `octokit/*` organizations which already publish immutable releases) are referencing immutable releases. This prevents supply chain attacks where a release could be modified after you've started using it.
 
-> [!NOTE]
-> This action checks releases against `api.github.com` (since third-party actions are typically hosted there), regardless of where this action runs.
-
 ## Usage
 
 ### Check all workflows (default)
