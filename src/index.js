@@ -1,39 +1,35 @@
 /**
- * Hello World GitHub Action
- * A simple template action that demonstrates common patterns and best practices
+ * Ensure Immutable Actions GitHub Action
+ * Validates that third-party actions in workflows are using immutable releases
  *
  * Local Development & Testing:
  *
  * 1. Set environment variables to simulate GitHub Actions inputs:
- *    export INPUT_WHO_TO_GREET="Local Developer"
- *    export INPUT_INCLUDE_TIME="true"
- *    export INPUT_MESSAGE_PREFIX="Hey"
- *    export INPUT_GITHUB_TOKEN="ghp_your_token_here"  # Optional, for repo stats
+ *    export INPUT_GITHUB_TOKEN="ghp_your_token_here"
+ *    export INPUT_FAIL_ON_MUTABLE="true"
+ *    export INPUT_WORKFLOWS="ci.yml,deploy.yml"  # Optional: specific workflows
+ *    export INPUT_EXCLUDE_WORKFLOWS="experimental.yml"  # Optional: workflows to exclude
  *
- * 2. Set GitHub context environment variables (optional, for repo stats):
+ * 2. Set GitHub context environment variables:
  *    export GITHUB_REPOSITORY="owner/repo-name"
- *    export GITHUB_REF="refs/heads/main"
- *    export GITHUB_SHA="abc123..."
+ *    export GITHUB_WORKSPACE="/path/to/repo"
  *
  * 3. Run locally:
  *    node src/index.js
- *
- * Example one-liner for testing:
- *    INPUT_WHO_TO_GREET="Local Dev" INPUT_INCLUDE_TIME="true" INPUT_MESSAGE_PREFIX="Hi" node src/index.js
- *
- * Note: Without GITHUB_REPOSITORY set, repo stats won't be fetched even with a token
  */
 
 import * as core from '@actions/core';
-import * as github from '@actions/github';
 import { Octokit } from '@octokit/rest';
+import * as fs from 'fs';
+import * as path from 'path';
+import YAML from 'yaml';
 
 /**
  * Get input value (works reliably in both GitHub Actions and local environments)
  * @param {string} name - Input name (with dashes)
  * @returns {string} Input value
  */
-function getInput(name) {
+export function getInput(name) {
   // Try core.getInput first (works in GitHub Actions)
   let value = core.getInput(name);
 
@@ -51,59 +47,244 @@ function getInput(name) {
  * @param {string} name - Input name
  * @returns {boolean} Boolean value
  */
-function getBooleanInput(name) {
+export function getBooleanInput(name) {
   const input = getInput(name).toLowerCase();
   return input === 'true' || input === '1' || input === 'yes';
 }
 
 /**
- * Get current timestamp in ISO format
- * @returns {string} Current timestamp
+ * Parse action reference from uses: field
+ * @param {string} uses - The uses string (e.g., "actions/checkout@v4" or "owner/repo/path@ref")
+ * @returns {Object|null} Parsed action { owner, repo, ref } or null if invalid
  */
-export function getCurrentTime() {
-  return new Date().toISOString();
-}
-
-/**
- * Create a greeting message
- * @param {string} prefix - Message prefix (e.g., "Hello")
- * @param {string} name - Name to greet
- * @returns {string} Formatted greeting
- */
-export function createGreeting(prefix, name) {
-  return `${prefix}, ${name}!`;
-}
-
-/**
- * Fetch repository statistics using GitHub API
- * @param {string} token - GitHub token
- * @param {string} owner - Repository owner
- * @param {string} repo - Repository name
- * @returns {Object} Repository statistics
- */
-export async function getRepoStats(token, owner, repo) {
-  try {
-    const octokit = new Octokit({ auth: token });
-
-    const { data: repoData } = await octokit.rest.repos.get({
-      owner,
-      repo
-    });
-
-    return {
-      name: repoData.full_name,
-      stars: repoData.stargazers_count,
-      forks: repoData.forks_count,
-      issues: repoData.open_issues_count,
-      language: repoData.language,
-      size: repoData.size,
-      created: repoData.created_at,
-      updated: repoData.updated_at
-    };
-  } catch (error) {
-    core.warning(`Failed to fetch repository stats: ${error.message}`);
+export function parseActionReference(uses) {
+  if (!uses || typeof uses !== 'string') {
     return null;
   }
+
+  // Skip local actions (starting with ./)
+  if (uses.startsWith('./')) {
+    return null;
+  }
+
+  // Handle docker:// and other special formats
+  if (uses.includes('://')) {
+    return null;
+  }
+
+  // Parse format: owner/repo@ref or owner/repo/path@ref
+  const match = uses.match(/^([^/]+)\/([^/@]+)(?:\/[^@]*)?@(.+)$/);
+  if (!match) {
+    return null;
+  }
+
+  const [, owner, repo, ref] = match;
+  return { owner, repo, ref };
+}
+
+/**
+ * Check if an action should be excluded from checks (organizations that already publish immutable releases)
+ * @param {string} owner - Action owner
+ * @returns {boolean} True if should be excluded
+ */
+export function shouldExcludeAction(owner) {
+  return owner === 'actions' || owner === 'github' || owner === 'octokit';
+}
+
+/**
+ * Extract all action references from a workflow file
+ * @param {string} workflowPath - Path to workflow YAML file
+ * @returns {Array} Array of action references
+ */
+export function extractActionsFromWorkflow(workflowPath) {
+  try {
+    const content = fs.readFileSync(workflowPath, 'utf8');
+    const workflow = YAML.parse(content);
+
+    const actions = [];
+    const jobs = workflow?.jobs || {};
+
+    for (const [jobName, job] of Object.entries(jobs)) {
+      const steps = job?.steps || [];
+      for (const step of steps) {
+        if (step?.uses) {
+          const parsed = parseActionReference(step.uses);
+          if (parsed && !shouldExcludeAction(parsed.owner)) {
+            actions.push({
+              uses: step.uses,
+              ...parsed,
+              jobName,
+              stepName: step.name || 'unnamed step'
+            });
+          }
+        }
+      }
+    }
+
+    return actions;
+  } catch (error) {
+    core.warning(`Failed to parse workflow ${workflowPath}: ${error.message}`);
+    return [];
+  }
+}
+
+/**
+ * Get list of workflow files to check
+ * @param {string} workflowsInput - Comma-separated workflow files (optional)
+ * @param {string} excludeWorkflowsInput - Comma-separated workflows to exclude (optional)
+ * @param {string} workspaceDir - Workspace directory path
+ * @returns {Array<string>} Array of workflow file paths
+ */
+export function getWorkflowFiles(workflowsInput, excludeWorkflowsInput, workspaceDir) {
+  const workflowsDir = path.join(workspaceDir, '.github', 'workflows');
+
+  if (!fs.existsSync(workflowsDir)) {
+    core.warning(`Workflows directory not found: ${workflowsDir}`);
+    return [];
+  }
+
+  let workflowFiles = [];
+
+  if (workflowsInput) {
+    // Check specific workflows
+    const specified = workflowsInput
+      .split(',')
+      .map(w => w.trim())
+      .filter(Boolean);
+    for (const workflow of specified) {
+      const fullPath = path.join(workflowsDir, workflow);
+      if (fs.existsSync(fullPath)) {
+        workflowFiles.push(fullPath);
+      } else {
+        core.warning(`Specified workflow file not found: ${workflow}`);
+      }
+    }
+  } else {
+    // Get all workflow files
+    const allFiles = fs.readdirSync(workflowsDir);
+    workflowFiles = allFiles
+      .filter(f => f.endsWith('.yml') || f.endsWith('.yaml'))
+      .map(f => path.join(workflowsDir, f));
+
+    // Apply exclusions
+    if (excludeWorkflowsInput) {
+      const excludes = excludeWorkflowsInput
+        .split(',')
+        .map(w => w.trim())
+        .filter(Boolean);
+      workflowFiles = workflowFiles.filter(f => {
+        const basename = path.basename(f);
+        return !excludes.includes(basename);
+      });
+    }
+  }
+
+  return workflowFiles;
+}
+
+/**
+ * Check if a reference is a full 40-character SHA
+ * @param {string} ref - Git ref to check
+ * @returns {boolean} True if ref is a 40-char SHA
+ */
+export function isFullSHA(ref) {
+  return /^[a-f0-9]{40}$/i.test(ref);
+}
+
+/**
+ * Check if a release is immutable via GitHub API
+ * Note: The 'immutable' property is a GitHub feature that indicates whether a release
+ * can be modified or deleted. This only applies to tag-based releases.
+ * @param {Octokit} octokit - Octokit instance
+ * @param {string} owner - Repository owner
+ * @param {string} repo - Repository name
+ * @param {string} ref - Git ref (tag, SHA, branch) - only tags can have releases
+ * @returns {Promise<Object>} { immutable: boolean, releaseFound: boolean, message: string }
+ */
+export async function checkReleaseImmutability(octokit, owner, repo, ref) {
+  // Full 40-char SHAs are inherently immutable (cryptographic hash can't change)
+  if (isFullSHA(ref)) {
+    return {
+      immutable: true,
+      releaseFound: false,
+      message: 'Immutable (full SHA reference)'
+    };
+  }
+
+  try {
+    // Try to get release by tag
+    // Note: getReleaseByTag only works with tag names, not SHAs or branches
+    const { data: release } = await octokit.rest.repos.getReleaseByTag({
+      owner,
+      repo,
+      tag: ref
+    });
+
+    // Check if immutable property exists and is true
+    // The 'immutable' property is returned by the GitHub API when a release
+    // has been marked as immutable (cannot be modified or deleted)
+    const isImmutable = release.immutable === true;
+
+    return {
+      immutable: isImmutable,
+      releaseFound: true,
+      message: isImmutable ? 'Immutable release' : 'Mutable release'
+    };
+  } catch (error) {
+    if (error.status === 404) {
+      // No release found for this tag
+      // This is expected for: commit SHAs, branch names, or tags without releases
+      return {
+        immutable: false,
+        releaseFound: false,
+        message: 'No release found for this reference'
+      };
+    }
+
+    // Other API errors
+    core.warning(`API error checking ${owner}/${repo}@${ref}: ${error.message}`);
+    return {
+      immutable: false,
+      releaseFound: false,
+      message: `API error: ${error.message}`
+    };
+  }
+}
+
+/**
+ * Check all actions from workflows
+ * @param {Octokit} octokit - Octokit instance
+ * @param {Array} actions - Array of action references
+ * @returns {Promise<Object>} { mutable: Array, immutable: Array }
+ */
+export async function checkAllActions(octokit, actions) {
+  const mutable = [];
+  const immutable = [];
+
+  // Deduplicate actions by uses string
+  const uniqueActions = Array.from(new Map(actions.map(a => [a.uses, a])).values());
+
+  for (const action of uniqueActions) {
+    core.info(`Checking ${action.owner}/${action.repo}@${action.ref}...`);
+
+    const result = await checkReleaseImmutability(octokit, action.owner, action.repo, action.ref);
+
+    const actionInfo = {
+      uses: action.uses,
+      owner: action.owner,
+      repo: action.repo,
+      ref: action.ref,
+      ...result
+    };
+
+    if (result.immutable) {
+      immutable.push(actionInfo);
+    } else {
+      mutable.push(actionInfo);
+    }
+  }
+
+  return { mutable, immutable };
 }
 
 /**
@@ -111,86 +292,151 @@ export async function getRepoStats(token, owner, repo) {
  */
 export async function run() {
   try {
-    // Get inputs from action.yml
-    const whoToGreet = getInput('who-to-greet') || 'World';
-    const includeTime = getBooleanInput('include-time');
-    const messagePrefix = getInput('message-prefix') || 'Hello';
+    // Get inputs
     const githubToken = getInput('github-token');
+    const failOnMutable = getBooleanInput('fail-on-mutable');
+    const workflowsInput = getInput('workflows');
+    const excludeWorkflowsInput = getInput('exclude-workflows');
 
-    core.info(`Starting Hello World Action...`);
-    core.info(`Who to greet: ${whoToGreet}`);
-    core.info(`Message prefix: ${messagePrefix}`);
-    core.info(`Include time: ${includeTime}`);
-    core.info(`GitHub token provided: ${githubToken ? 'Yes' : 'No'}`);
-
-    // Create the greeting message
-    const greeting = createGreeting(messagePrefix, whoToGreet);
-
-    // Log the greeting
-    core.info(`Generated greeting: ${greeting}`);
-
-    // Set the greeting as an output
-    core.setOutput('message', greeting);
-
-    // Optionally include timestamp
-    let currentTime = null;
-    if (includeTime) {
-      currentTime = getCurrentTime();
-      core.info(`Current time: ${currentTime}`);
-      core.setOutput('time', currentTime);
+    if (!githubToken) {
+      core.setFailed('github-token is required');
+      return;
     }
 
-    // Optionally fetch repository stats if token is provided
-    let repoStats = null;
-    if (githubToken && github.context.repo.owner && github.context.repo.repo) {
-      core.info('Fetching repository statistics...');
-      repoStats = await getRepoStats(githubToken, github.context.repo.owner, github.context.repo.repo);
+    core.info('Starting Ensure Immutable Actions...');
+    core.info(`Fail on mutable: ${failOnMutable}`);
 
-      if (repoStats) {
-        core.info(`Repository: ${repoStats.name}`);
-        core.info(`⭐ Stars: ${repoStats.stars}`);
-        core.info(`🍴 Forks: ${repoStats.forks}`);
-        core.info(`🐛 Open Issues: ${repoStats.issues}`);
-        core.info(`📝 Language: ${repoStats.language || 'Unknown'}`);
+    // Get workspace directory
+    const workspaceDir = process.env.GITHUB_WORKSPACE || process.cwd();
+    core.info(`Workspace directory: ${workspaceDir}`);
 
-        core.setOutput('repo-stats', JSON.stringify(repoStats));
+    // Get workflow files to check
+    const workflowFiles = getWorkflowFiles(workflowsInput, excludeWorkflowsInput, workspaceDir);
+
+    if (workflowFiles.length === 0) {
+      core.warning('No workflow files found to check');
+      core.setOutput('all-passed', true);
+      core.setOutput('workflows-checked', '[]');
+      core.setOutput('mutable-actions', '[]');
+      core.setOutput('immutable-actions', '[]');
+      return;
+    }
+
+    core.info(`Found ${workflowFiles.length} workflow file(s) to check`);
+    const workflowBasenames = workflowFiles.map(f => path.basename(f));
+    core.info(`Workflows: ${workflowBasenames.join(', ')}`);
+
+    // Extract all actions from workflows
+    const allActions = [];
+    for (const workflowFile of workflowFiles) {
+      const basename = path.basename(workflowFile);
+      core.info(`Parsing workflow: ${basename}`);
+      const actions = extractActionsFromWorkflow(workflowFile);
+      core.info(`  Found ${actions.length} third-party action(s)`);
+      allActions.push(...actions);
+    }
+
+    if (allActions.length === 0) {
+      core.info('No third-party actions found in workflows');
+      core.setOutput('all-passed', true);
+      core.setOutput('workflows-checked', JSON.stringify(workflowBasenames));
+      core.setOutput('mutable-actions', '[]');
+      core.setOutput('immutable-actions', '[]');
+
+      // Create summary
+      try {
+        await core.summary
+          .addHeading('✅ Immutable Actions Check - All Passed')
+          .addRaw(`No third-party actions found in checked workflows.`)
+          .write();
+      } catch {
+        core.info('✅ All checks passed (no third-party actions found)');
       }
+
+      return;
     }
 
-    // Example of setting a secret (this won't be logged)
-    core.setSecret('my-secret-value');
+    core.info(`Total actions to check: ${allActions.length}`);
 
-    // Create enhanced summary with repo stats if available
-    const summaryTable = [
+    // Initialize Octokit
+    const octokit = new Octokit({ auth: githubToken });
+
+    // Check all actions
+    const { mutable, immutable } = await checkAllActions(octokit, allActions);
+
+    // Set outputs
+    core.setOutput('workflows-checked', JSON.stringify(workflowBasenames));
+    core.setOutput('mutable-actions', JSON.stringify(mutable));
+    core.setOutput('immutable-actions', JSON.stringify(immutable));
+    core.setOutput('all-passed', mutable.length === 0);
+
+    // Create summary table
+    const summaryRows = [
       [
-        { data: 'Field', header: true },
-        { data: 'Value', header: true }
-      ],
-      ['Greeting', greeting],
-      ...(includeTime ? [['Timestamp', currentTime]] : []),
-      ...(repoStats
-        ? [
-            ['Repository', repoStats.name],
-            ['⭐ Stars', repoStats.stars.toString()],
-            ['🍴 Forks', repoStats.forks.toString()],
-            ['🐛 Open Issues', repoStats.issues.toString()],
-            ['📝 Language', repoStats.language || 'Unknown']
-          ]
-        : [])
+        { data: 'Action', header: true },
+        { data: 'Status', header: true },
+        { data: 'Message', header: true }
+      ]
     ];
 
-    // Create summary (only works in GitHub Actions environment)
+    // Add immutable actions
+    for (const action of immutable) {
+      summaryRows.push([`${action.owner}/${action.repo}@${action.ref}`, '✅ Immutable', action.message]);
+    }
+
+    // Add mutable actions
+    for (const action of mutable) {
+      summaryRows.push([`${action.owner}/${action.repo}@${action.ref}`, '❌ Mutable', action.message]);
+    }
+
+    // Create summary
     try {
-      await core.summary.addHeading('🎯 Hello World Action Results').addTable(summaryTable).write();
+      let summary = core.summary;
+
+      if (mutable.length === 0) {
+        summary = summary.addHeading('✅ Immutable Actions Check - All Passed');
+      } else {
+        summary = summary.addHeading('❌ Immutable Actions Check - Failed');
+      }
+
+      summary = summary
+        .addRaw(`\n**Workflows Checked:** ${workflowBasenames.join(', ')}\n\n`)
+        .addRaw(`**Summary:** ${immutable.length} immutable, ${mutable.length} mutable\n\n`)
+        .addTable(summaryRows);
+
+      await summary.write();
     } catch {
-      // Fallback: write table to console for local development
-      core.info('📊 Hello World Action Results:');
-      for (const [field, value] of summaryTable.slice(1)) {
-        core.info(`   ${field}: ${value}`);
+      // Fallback for local development
+      core.info('📊 Immutable Actions Check Results:');
+      core.info(`   Workflows: ${workflowBasenames.join(', ')}`);
+      core.info(`   Immutable: ${immutable.length}`);
+      core.info(`   Mutable: ${mutable.length}`);
+    }
+
+    // Log results
+    if (immutable.length > 0) {
+      core.info(`\n✅ ${immutable.length} action(s) using immutable releases:`);
+      for (const action of immutable) {
+        core.info(`   - ${action.owner}/${action.repo}@${action.ref}`);
       }
     }
 
-    core.info('✅ Action completed successfully!');
+    if (mutable.length > 0) {
+      core.warning(`\n❌ ${mutable.length} action(s) using mutable releases:`);
+      for (const action of mutable) {
+        core.warning(`   - ${action.owner}/${action.repo}@${action.ref} (${action.message})`);
+      }
+    }
+
+    // Fail if needed
+    if (failOnMutable && mutable.length > 0) {
+      core.setFailed(
+        `Found ${mutable.length} action(s) using mutable releases. ` +
+          `Please use immutable releases for supply chain security.`
+      );
+    } else if (mutable.length === 0) {
+      core.info('\n✅ All third-party actions are using immutable releases!');
+    }
   } catch (error) {
     core.setFailed(`Action failed with error: ${error.message}`);
   }

@@ -1,34 +1,34 @@
-name: 'NodeJS Actions Starter Template'
-description: '👋 A simple Hello World GitHub Action template with customizable greetings'
+name: 'Ensure Immutable Actions'
+description: 'Validates third-party actions in your workflows are using immutable releases'
 
 branding:
-  icon: 'message-circle'
-  color: 'green'
+  icon: 'shield'
+  color: 'blue'
 
 inputs:
-  who-to-greet:
-    description: 'Who to greet in the message'
-    required: false
-    default: 'World'
-  include-time:
-    description: 'Whether to include current time in output'
-    required: false
-    default: 'false'
-  message-prefix:
-    description: 'Prefix for the greeting message'
-    required: false
-    default: 'Hello'
   github-token:
-    description: 'GitHub token for API access (optional, for repo stats)'
+    description: 'GitHub token for API calls'
+    required: true
+  fail-on-mutable:
+    description: 'Fail the workflow if mutable actions are found'
+    required: false
+    default: 'true'
+  workflows:
+    description: 'Specific workflow files to check (comma-separated, e.g., ci.yml,deploy.yml). If not specified, checks ALL workflows in .github/workflows/'
+    required: false
+  exclude-workflows:
+    description: 'Workflow files to exclude from checks (comma-separated). Only applies when workflows are not specified'
     required: false
 
 outputs:
-  message:
-    description: 'The generated greeting message'
-  time:
-    description: 'Current timestamp (if requested)'
-  repo-stats:
-    description: 'Repository statistics (if token provided)'
+  mutable-actions:
+    description: 'JSON array of actions using mutable releases'
+  immutable-actions:
+    description: 'JSON array of actions using immutable releases'
+  all-passed:
+    description: 'Boolean indicating if all checks passed'
+  workflows-checked:
+    description: 'List of workflow files that were checked'
 
 runs:
   using: 'node20'
