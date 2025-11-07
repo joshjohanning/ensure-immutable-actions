@@ -89,12 +89,15 @@ describe('Ensure Immutable Actions', () => {
       });
     });
 
-    test('should parse action with SHA reference', () => {
-      const result = parseActionReference('joshjohanning/npm-version-check-action@abc123def456');
+    test('should parse action with full 40-char SHA reference', () => {
+      // GitHub Actions requires full 40-char SHA for commit references
+      const result = parseActionReference(
+        'actions/checkout@1234567890abcdef1234567890abcdef12345678'
+      );
       expect(result).toEqual({
-        owner: 'joshjohanning',
-        repo: 'npm-version-check-action',
-        ref: 'abc123def456'
+        owner: 'actions',
+        repo: 'checkout',
+        ref: '1234567890abcdef1234567890abcdef12345678'
       });
     });
 
