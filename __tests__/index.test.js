@@ -49,7 +49,8 @@ const {
   checkAllActions,
   getInput,
   getBooleanInput,
-  isFullSHA
+  isFullSHA,
+  formatActionReference
 } = await import('../src/index.js');
 
 describe('Ensure Immutable Actions', () => {
@@ -294,6 +295,25 @@ jobs:
       expect(isFullSHA('abc123')).toBe(false); // short SHA
       expect(isFullSHA('1234567890abcdef1234567890abcdef1234567g')).toBe(false); // invalid char
       expect(isFullSHA('1234567890abcdef1234567890abcdef123456')).toBe(false); // too short
+    });
+  });
+
+  describe('formatActionReference', () => {
+    test('should not add hyperlink for full SHA references', () => {
+      const result = formatActionReference('owner', 'repo', '1234567890abcdef1234567890abcdef12345678');
+      expect(result).toBe('owner/repo@1234567890abcdef1234567890abcdef12345678');
+      expect(result).not.toContain('[');
+      expect(result).not.toContain('](');
+    });
+
+    test('should add hyperlink for tag references', () => {
+      const result = formatActionReference('owner', 'repo', 'v1.0.0');
+      expect(result).toBe('[owner/repo@v1.0.0](https://github.com/owner/repo/tree/v1.0.0)');
+    });
+
+    test('should add hyperlink for branch references', () => {
+      const result = formatActionReference('owner', 'repo', 'main');
+      expect(result).toBe('[owner/repo@main](https://github.com/owner/repo/tree/main)');
     });
   });
 

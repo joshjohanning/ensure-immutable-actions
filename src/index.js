@@ -194,6 +194,26 @@ export function isFullSHA(ref) {
 }
 
 /**
+ * Format action reference with hyperlink to GitHub
+ * @param {string} owner - Repository owner
+ * @param {string} repo - Repository name
+ * @param {string} ref - Git ref (tag, SHA, branch)
+ * @returns {string} Markdown formatted action reference with link
+ */
+export function formatActionReference(owner, repo, ref) {
+  const actionRef = `${owner}/${repo}@${ref}`;
+
+  // SHAs already get hyperlinked by GitHub automatically, so just return plain text
+  if (isFullSHA(ref)) {
+    return actionRef;
+  }
+
+  // For tags and branches, create a hyperlink to the repository
+  const url = `https://github.com/${owner}/${repo}/tree/${ref}`;
+  return `[${actionRef}](${url})`;
+}
+
+/**
  * Check if a release is immutable via GitHub API
  * Note: The 'immutable' property is a GitHub feature that indicates whether a release
  * can be modified or deleted. This only applies to tag-based releases.
@@ -432,13 +452,9 @@ export async function run() {
           `**Actions:** ${workflowImmutableCount} immutable, ${workflowMutableCount} mutable\n\n`
         );
 
-        const workflowRows = [
-          [
-            { data: 'Action', header: true },
-            { data: 'Status', header: true },
-            { data: 'Message', header: true }
-          ]
-        ];
+        // Build markdown table
+        let markdownTable = '| Action | Status | Message |\n';
+        markdownTable += '|--------|--------|----------|\n';
 
         // Deduplicate actions within this workflow for display
         const uniqueActionsInWorkflow = Array.from(
@@ -453,10 +469,11 @@ export async function run() {
 
         for (const action of sortedActions) {
           const status = action.immutable ? '✅ Immutable' : '❌ Mutable';
-          workflowRows.push([`${action.owner}/${action.repo}@${action.ref}`, status, action.message]);
+          const actionRef = formatActionReference(action.owner, action.repo, action.ref);
+          markdownTable += `| ${actionRef} | ${status} | ${action.message} |\n`;
         }
 
-        summary = summary.addTable(workflowRows).addRaw('\n');
+        summary = summary.addRaw(markdownTable).addRaw('\n');
       }
 
       await summary.write();
