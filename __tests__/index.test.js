@@ -164,8 +164,10 @@ jobs:
       expect(actions[0].repo).toBe('npm-version-check-action');
       expect(actions[0].ref).toBe('v1');
       expect(actions[0].stepName).toBe('Check npm version');
+      expect(actions[0].workflowFile).toBe('test-workflow.yml');
 
       expect(actions[1].owner).toBe('third-party');
+      expect(actions[1].workflowFile).toBe('test-workflow.yml');
 
       fs.unlinkSync(tempFile);
     });
@@ -380,19 +382,22 @@ jobs:
           uses: 'owner1/repo1@v1',
           owner: 'owner1',
           repo: 'repo1',
-          ref: 'v1'
+          ref: 'v1',
+          workflowFile: 'workflow1.yml'
         },
         {
           uses: 'owner2/repo2@v2',
           owner: 'owner2',
           repo: 'repo2',
-          ref: 'v2'
+          ref: 'v2',
+          workflowFile: 'workflow1.yml'
         },
         {
           uses: 'owner3/repo3@v3',
           owner: 'owner3',
           repo: 'repo3',
-          ref: 'v3'
+          ref: 'v3',
+          workflowFile: 'workflow2.yml'
         }
       ];
 
@@ -408,6 +413,15 @@ jobs:
       expect(result.immutable[0].owner).toBe('owner1');
       expect(result.mutable[0].owner).toBe('owner2');
       expect(result.mutable[1].owner).toBe('owner3');
+
+      // Check byWorkflow grouping
+      expect(result.byWorkflow).toBeDefined();
+      expect(result.byWorkflow['workflow1.yml']).toBeDefined();
+      expect(result.byWorkflow['workflow1.yml'].immutable).toHaveLength(1);
+      expect(result.byWorkflow['workflow1.yml'].mutable).toHaveLength(1);
+      expect(result.byWorkflow['workflow2.yml']).toBeDefined();
+      expect(result.byWorkflow['workflow2.yml'].immutable).toHaveLength(0);
+      expect(result.byWorkflow['workflow2.yml'].mutable).toHaveLength(1);
     });
 
     test('should deduplicate actions by uses string', async () => {
@@ -416,19 +430,22 @@ jobs:
           uses: 'owner/repo@v1',
           owner: 'owner',
           repo: 'repo',
-          ref: 'v1'
+          ref: 'v1',
+          workflowFile: 'workflow1.yml'
         },
         {
           uses: 'owner/repo@v1',
           owner: 'owner',
           repo: 'repo',
-          ref: 'v1'
+          ref: 'v1',
+          workflowFile: 'workflow1.yml'
         },
         {
           uses: 'owner/repo@v2',
           owner: 'owner',
           repo: 'repo',
-          ref: 'v2'
+          ref: 'v2',
+          workflowFile: 'workflow2.yml'
         }
       ];
 
@@ -440,6 +457,38 @@ jobs:
 
       // Should only call API twice (for v1 and v2), not three times
       expect(mockOctokit.rest.repos.getReleaseByTag).toHaveBeenCalledTimes(2);
+    });
+
+    test('should group same action appearing in multiple workflows', async () => {
+      const actions = [
+        {
+          uses: 'owner/repo@v1',
+          owner: 'owner',
+          repo: 'repo',
+          ref: 'v1',
+          workflowFile: 'workflow1.yml'
+        },
+        {
+          uses: 'owner/repo@v1',
+          owner: 'owner',
+          repo: 'repo',
+          ref: 'v1',
+          workflowFile: 'workflow2.yml'
+        }
+      ];
+
+      mockOctokit.rest.repos.getReleaseByTag.mockResolvedValue({
+        data: { immutable: true }
+      });
+
+      const result = await checkAllActions(mockOctokit, actions);
+
+      // Should only call API once (same action)
+      expect(mockOctokit.rest.repos.getReleaseByTag).toHaveBeenCalledTimes(1);
+
+      // But should appear in both workflows
+      expect(result.byWorkflow['workflow1.yml'].immutable).toHaveLength(1);
+      expect(result.byWorkflow['workflow2.yml'].immutable).toHaveLength(1);
     });
   });
 

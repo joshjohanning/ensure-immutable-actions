@@ -100,6 +100,7 @@ export function extractActionsFromWorkflow(workflowPath) {
   try {
     const content = fs.readFileSync(workflowPath, 'utf8');
     const workflow = YAML.parse(content);
+    const workflowFile = path.basename(workflowPath);
 
     const actions = [];
     const jobs = workflow?.jobs || {};
@@ -113,6 +114,7 @@ export function extractActionsFromWorkflow(workflowPath) {
             actions.push({
               uses: step.uses,
               ...parsed,
+              workflowFile,
               jobName,
               stepName: step.name || 'unnamed step'
             });
@@ -255,19 +257,24 @@ export async function checkReleaseImmutability(octokit, owner, repo, ref) {
  * Check all actions from workflows
  * @param {Octokit} octokit - Octokit instance
  * @param {Array} actions - Array of action references
- * @returns {Promise<Object>} { mutable: Array, immutable: Array }
+ * @returns {Promise<Object>} { mutable: Array, immutable: Array, byWorkflow: Object }
  */
 export async function checkAllActions(octokit, actions) {
   const mutable = [];
   const immutable = [];
+  const byWorkflow = {};
 
-  // Deduplicate actions by uses string
+  // Deduplicate actions by uses string for API calls, but preserve workflow info
   const uniqueActions = Array.from(new Map(actions.map(a => [a.uses, a])).values());
+
+  // Create a cache for immutability results
+  const immutabilityCache = new Map();
 
   for (const action of uniqueActions) {
     core.info(`Checking ${action.owner}/${action.repo}@${action.ref}...`);
 
     const result = await checkReleaseImmutability(octokit, action.owner, action.repo, action.ref);
+    immutabilityCache.set(action.uses, result);
 
     const actionInfo = {
       uses: action.uses,
@@ -284,7 +291,31 @@ export async function checkAllActions(octokit, actions) {
     }
   }
 
-  return { mutable, immutable };
+  // Group all actions by workflow (including duplicates within same workflow)
+  for (const action of actions) {
+    const workflowFile = action.workflowFile;
+    if (!byWorkflow[workflowFile]) {
+      byWorkflow[workflowFile] = { mutable: [], immutable: [] };
+    }
+
+    const cachedResult = immutabilityCache.get(action.uses);
+    const actionInfo = {
+      uses: action.uses,
+      owner: action.owner,
+      repo: action.repo,
+      ref: action.ref,
+      workflowFile: action.workflowFile,
+      ...cachedResult
+    };
+
+    if (cachedResult.immutable) {
+      byWorkflow[workflowFile].immutable.push(actionInfo);
+    } else {
+      byWorkflow[workflowFile].mutable.push(actionInfo);
+    }
+  }
+
+  return { mutable, immutable, byWorkflow };
 }
 
 /**
@@ -362,7 +393,7 @@ export async function run() {
     const octokit = new Octokit({ auth: githubToken });
 
     // Check all actions
-    const { mutable, immutable } = await checkAllActions(octokit, allActions);
+    const { mutable, immutable, byWorkflow } = await checkAllActions(octokit, allActions);
 
     // Set outputs
     core.setOutput('workflows-checked', JSON.stringify(workflowBasenames));
@@ -370,26 +401,7 @@ export async function run() {
     core.setOutput('immutable-actions', JSON.stringify(immutable));
     core.setOutput('all-passed', mutable.length === 0);
 
-    // Create summary table
-    const summaryRows = [
-      [
-        { data: 'Action', header: true },
-        { data: 'Status', header: true },
-        { data: 'Message', header: true }
-      ]
-    ];
-
-    // Add immutable actions
-    for (const action of immutable) {
-      summaryRows.push([`${action.owner}/${action.repo}@${action.ref}`, '✅ Immutable', action.message]);
-    }
-
-    // Add mutable actions
-    for (const action of mutable) {
-      summaryRows.push([`${action.owner}/${action.repo}@${action.ref}`, '❌ Mutable', action.message]);
-    }
-
-    // Create summary
+    // Create summary with separate tables per workflow
     try {
       let summary = core.summary;
 
@@ -401,8 +413,51 @@ export async function run() {
 
       summary = summary
         .addRaw(`\n**Workflows Checked:** ${workflowBasenames.join(', ')}\n\n`)
-        .addRaw(`**Summary:** ${immutable.length} immutable, ${mutable.length} mutable\n\n`)
-        .addTable(summaryRows);
+        .addRaw(`**Summary:** ${immutable.length} immutable, ${mutable.length} mutable\n\n`);
+
+      // Add a table for each workflow
+      for (const workflowFile of workflowBasenames) {
+        const workflowData = byWorkflow[workflowFile];
+
+        if (!workflowData || (workflowData.immutable.length === 0 && workflowData.mutable.length === 0)) {
+          continue;
+        }
+
+        const workflowMutableCount = workflowData.mutable.length;
+        const workflowImmutableCount = workflowData.immutable.length;
+        const workflowStatus = workflowMutableCount === 0 ? '✅' : '❌';
+
+        summary = summary.addHeading(`${workflowStatus} ${workflowFile}`, 3);
+        summary = summary.addRaw(
+          `**Actions:** ${workflowImmutableCount} immutable, ${workflowMutableCount} mutable\n\n`
+        );
+
+        const workflowRows = [
+          [
+            { data: 'Action', header: true },
+            { data: 'Status', header: true },
+            { data: 'Message', header: true }
+          ]
+        ];
+
+        // Deduplicate actions within this workflow for display
+        const uniqueActionsInWorkflow = Array.from(
+          new Map([...workflowData.immutable, ...workflowData.mutable].map(a => [a.uses, a])).values()
+        );
+
+        // Sort: immutable first, then mutable
+        const sortedActions = uniqueActionsInWorkflow.sort((a, b) => {
+          if (a.immutable === b.immutable) return 0;
+          return a.immutable ? -1 : 1;
+        });
+
+        for (const action of sortedActions) {
+          const status = action.immutable ? '✅ Immutable' : '❌ Mutable';
+          workflowRows.push([`${action.owner}/${action.repo}@${action.ref}`, status, action.message]);
+        }
+
+        summary = summary.addTable(workflowRows).addRaw('\n');
+      }
 
       await summary.write();
     } catch {
