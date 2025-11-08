@@ -571,7 +571,7 @@ jobs:
 
       await run();
 
-      expect(mockCore.setFailed).toHaveBeenCalledWith('github-token is required');
+      expect(mockCore.setFailed).toHaveBeenCalledWith('github-token is required (defaults to github.token)');
     });
 
     test('should handle no workflows found', async () => {

@@ -299,7 +299,7 @@ export async function run() {
     const excludeWorkflowsInput = getInput('exclude-workflows');
 
     if (!githubToken) {
-      core.setFailed('github-token is required');
+      core.setFailed('github-token is required (defaults to github.token)');
       return;
     }
 

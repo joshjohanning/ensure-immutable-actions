@@ -9,6 +9,7 @@ inputs:
   github-token:
     description: 'GitHub token for API calls'
     required: true
+    default: ${{ github.token }}
   fail-on-mutable:
     description: 'Fail the workflow if mutable actions are found'
     required: false
