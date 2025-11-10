@@ -159,16 +159,28 @@ jobs:
 
       const actions = extractActionsFromWorkflow(tempFile);
 
-      // Should only include third-party actions (not actions/*)
-      expect(actions).toHaveLength(2);
-      expect(actions[0].owner).toBe('joshjohanning');
-      expect(actions[0].repo).toBe('npm-version-check-action');
-      expect(actions[0].ref).toBe('v1');
-      expect(actions[0].stepName).toBe('Check npm version');
+      // Should now include all actions (first-party and third-party)
+      expect(actions).toHaveLength(3);
+
+      // First action should be first-party
+      expect(actions[0].owner).toBe('actions');
+      expect(actions[0].repo).toBe('checkout');
+      expect(actions[0].ref).toBe('v4');
+      expect(actions[0].isFirstParty).toBe(true);
       expect(actions[0].workflowFile).toBe('test-workflow.yml');
 
-      expect(actions[1].owner).toBe('third-party');
+      // Second action should be third-party
+      expect(actions[1].owner).toBe('joshjohanning');
+      expect(actions[1].repo).toBe('npm-version-check-action');
+      expect(actions[1].ref).toBe('v1');
+      expect(actions[1].stepName).toBe('Check npm version');
+      expect(actions[1].isFirstParty).toBe(false);
       expect(actions[1].workflowFile).toBe('test-workflow.yml');
+
+      // Third action should be third-party
+      expect(actions[2].owner).toBe('third-party');
+      expect(actions[2].isFirstParty).toBe(false);
+      expect(actions[2].workflowFile).toBe('test-workflow.yml');
 
       fs.unlinkSync(tempFile);
     });
@@ -510,6 +522,50 @@ jobs:
       expect(result.byWorkflow['workflow1.yml'].immutable).toHaveLength(1);
       expect(result.byWorkflow['workflow2.yml'].immutable).toHaveLength(1);
     });
+
+    test('should handle first-party actions without API calls', async () => {
+      const actions = [
+        {
+          uses: 'actions/checkout@v4',
+          owner: 'actions',
+          repo: 'checkout',
+          ref: 'v4',
+          workflowFile: 'workflow1.yml',
+          isFirstParty: true
+        },
+        {
+          uses: 'owner/repo@v1',
+          owner: 'owner',
+          repo: 'repo',
+          ref: 'v1',
+          workflowFile: 'workflow1.yml',
+          isFirstParty: false
+        }
+      ];
+
+      mockOctokit.rest.repos.getReleaseByTag.mockResolvedValue({
+        data: { immutable: true }
+      });
+
+      const result = await checkAllActions(mockOctokit, actions);
+
+      // Should only call API once (for third-party action)
+      expect(mockOctokit.rest.repos.getReleaseByTag).toHaveBeenCalledTimes(1);
+
+      // First-party actions should be in firstParty array
+      expect(result.firstParty).toHaveLength(1);
+      expect(result.firstParty[0].owner).toBe('actions');
+      expect(result.firstParty[0].message).toBe('First-party action');
+      expect(result.firstParty[0].isFirstParty).toBe(true);
+
+      // Third-party action should be in immutable array
+      expect(result.immutable).toHaveLength(1);
+      expect(result.immutable[0].owner).toBe('owner');
+
+      // Check byWorkflow grouping includes firstParty
+      expect(result.byWorkflow['workflow1.yml'].firstParty).toHaveLength(1);
+      expect(result.byWorkflow['workflow1.yml'].immutable).toHaveLength(1);
+    });
   });
 
   describe('getInput and getBooleanInput', () => {
@@ -653,7 +709,7 @@ jobs:
       expect(mockCore.setOutput).toHaveBeenCalledWith('all-passed', true);
     });
 
-    test('should handle workflows with no third-party actions', async () => {
+    test('should handle workflows with only first-party actions', async () => {
       // Create workflow with only actions/* actions
       const workflowContent = `
 name: CI
@@ -669,7 +725,8 @@ jobs:
 
       await run();
 
-      expect(mockCore.info).toHaveBeenCalledWith(expect.stringContaining('No third-party actions found'));
+      // Should now process first-party actions
+      expect(mockCore.info).not.toHaveBeenCalledWith(expect.stringContaining('No third-party actions found'));
       expect(mockCore.setOutput).toHaveBeenCalledWith('all-passed', true);
     });
   });
