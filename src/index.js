@@ -512,14 +512,8 @@ export async function run() {
         let markdownTable = '| Action | Status | Message |\n';
         markdownTable += '|--------|--------|----------|\n';
 
-        // Sort: first-party first, then immutable, then mutable
-        const workflowActions = [...workflowData.firstParty, ...workflowData.immutable, ...workflowData.mutable];
-        const sortedActions = workflowActions.sort((a, b) => {
-          if (a.isFirstParty && !b.isFirstParty) return -1;
-          if (!a.isFirstParty && b.isFirstParty) return 1;
-          if (a.immutable === b.immutable) return 0;
-          return a.immutable ? -1 : 1;
-        });
+        // Use concatenation order: first-party, then immutable, then mutable
+        const sortedActions = [...workflowData.firstParty, ...workflowData.immutable, ...workflowData.mutable];
 
         for (const action of sortedActions) {
           let status;
