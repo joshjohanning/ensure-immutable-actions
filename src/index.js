@@ -291,8 +291,12 @@ export async function checkAllActions(octokit, actions) {
   const thirdPartyActions = actions.filter(a => !a.isFirstParty);
   const firstPartyActions = actions.filter(a => a.isFirstParty);
 
-  // Process first-party actions (no API check needed)
-  for (const action of firstPartyActions) {
+  // Create a cache for immutability results
+  const immutabilityCache = new Map();
+
+  // Process first-party actions (no API check needed) - deduplicate by uses string
+  const uniqueFirstPartyActions = Array.from(new Map(firstPartyActions.map(a => [a.uses, a])).values());
+  for (const action of uniqueFirstPartyActions) {
     const actionInfo = {
       uses: action.uses,
       owner: action.owner,
@@ -304,13 +308,17 @@ export async function checkAllActions(octokit, actions) {
       message: 'First-party action'
     };
     firstParty.push(actionInfo);
+
+    // Cache result for workflow grouping
+    immutabilityCache.set(action.uses, {
+      immutable: true,
+      releaseFound: false,
+      message: 'First-party action'
+    });
   }
 
   // Deduplicate third-party actions by uses string for API calls, but preserve workflow info
   const uniqueActions = Array.from(new Map(thirdPartyActions.map(a => [a.uses, a])).values());
-
-  // Create a cache for immutability results
-  const immutabilityCache = new Map();
 
   for (const action of uniqueActions) {
     core.info(`Checking ${action.owner}/${action.repo}@${action.ref}...`);
@@ -332,15 +340,6 @@ export async function checkAllActions(octokit, actions) {
     } else {
       mutable.push(actionInfo);
     }
-  }
-
-  // Cache first-party actions results for workflow grouping
-  for (const action of firstPartyActions) {
-    immutabilityCache.set(action.uses, {
-      immutable: true,
-      releaseFound: false,
-      message: 'First-party action'
-    });
   }
 
   // Group all actions by workflow (including duplicates within same workflow)
@@ -454,6 +453,7 @@ export async function run() {
     core.setOutput('workflows-checked', JSON.stringify(workflowBasenames));
     core.setOutput('mutable-actions', JSON.stringify(mutable));
     core.setOutput('immutable-actions', JSON.stringify(immutable));
+    core.setOutput('first-party-actions', JSON.stringify(firstParty));
     core.setOutput('all-passed', mutable.length === 0);
 
     // Create summary with separate tables per workflow
