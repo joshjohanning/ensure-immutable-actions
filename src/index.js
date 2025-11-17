@@ -342,30 +342,43 @@ export async function checkAllActions(octokit, actions) {
     }
   }
 
-  // Group all actions by workflow (including duplicates within same workflow)
+  // Group all actions by workflow (deduplicate within each workflow)
+  // First, group actions by workflow file
+  const actionsByWorkflow = {};
   for (const action of actions) {
     const workflowFile = action.workflowFile;
-    if (!byWorkflow[workflowFile]) {
-      byWorkflow[workflowFile] = { mutable: [], immutable: [], firstParty: [] };
+    if (!actionsByWorkflow[workflowFile]) {
+      actionsByWorkflow[workflowFile] = [];
     }
+    actionsByWorkflow[workflowFile].push(action);
+  }
 
-    const cachedResult = immutabilityCache.get(action.uses);
-    const actionInfo = {
-      uses: action.uses,
-      owner: action.owner,
-      repo: action.repo,
-      ref: action.ref,
-      workflowFile: action.workflowFile,
-      isFirstParty: action.isFirstParty || false,
-      ...cachedResult
-    };
+  // Then, deduplicate within each workflow and categorize
+  for (const [workflowFile, workflowActions] of Object.entries(actionsByWorkflow)) {
+    byWorkflow[workflowFile] = { mutable: [], immutable: [], firstParty: [] };
 
-    if (action.isFirstParty) {
-      byWorkflow[workflowFile].firstParty.push(actionInfo);
-    } else if (cachedResult.immutable) {
-      byWorkflow[workflowFile].immutable.push(actionInfo);
-    } else {
-      byWorkflow[workflowFile].mutable.push(actionInfo);
+    // Deduplicate by uses string within this workflow
+    const uniqueWorkflowActions = Array.from(new Map(workflowActions.map(a => [a.uses, a])).values());
+
+    for (const action of uniqueWorkflowActions) {
+      const cachedResult = immutabilityCache.get(action.uses);
+      const actionInfo = {
+        uses: action.uses,
+        owner: action.owner,
+        repo: action.repo,
+        ref: action.ref,
+        workflowFile: action.workflowFile,
+        isFirstParty: action.isFirstParty || false,
+        ...cachedResult
+      };
+
+      if (action.isFirstParty) {
+        byWorkflow[workflowFile].firstParty.push(actionInfo);
+      } else if (cachedResult.immutable) {
+        byWorkflow[workflowFile].immutable.push(actionInfo);
+      } else {
+        byWorkflow[workflowFile].mutable.push(actionInfo);
+      }
     }
   }
 
@@ -499,15 +512,9 @@ export async function run() {
         let markdownTable = '| Action | Status | Message |\n';
         markdownTable += '|--------|--------|----------|\n';
 
-        // Deduplicate actions within this workflow for display
-        const uniqueActionsInWorkflow = Array.from(
-          new Map(
-            [...workflowData.firstParty, ...workflowData.immutable, ...workflowData.mutable].map(a => [a.uses, a])
-          ).values()
-        );
-
         // Sort: first-party first, then immutable, then mutable
-        const sortedActions = uniqueActionsInWorkflow.sort((a, b) => {
+        const workflowActions = [...workflowData.firstParty, ...workflowData.immutable, ...workflowData.mutable];
+        const sortedActions = workflowActions.sort((a, b) => {
           if (a.isFirstParty && !b.isFirstParty) return -1;
           if (!a.isFirstParty && b.isFirstParty) return 1;
           if (a.immutable === b.immutable) return 0;
