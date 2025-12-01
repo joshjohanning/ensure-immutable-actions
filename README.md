@@ -89,13 +89,13 @@ jobs:
 
 ## Outputs
 
-| Output                 | Description                                                          |
-| ---------------------- | -------------------------------------------------------------------- |
-| `mutable-actions`      | JSON array of actions using mutable releases                         |
-| `immutable-actions`    | JSON array of actions using immutable releases                       |
-| `first-party-actions`  | JSON array of first-party actions (actions/\*, github/\*, octokit/\*) |
-| `all-passed`           | Boolean indicating if all checks passed                              |
-| `workflows-checked`    | List of workflow files that were checked                             |
+| Output                | Description                                                           |
+| --------------------- | --------------------------------------------------------------------- |
+| `mutable-actions`     | JSON array of actions using mutable releases                          |
+| `immutable-actions`   | JSON array of actions using immutable releases                        |
+| `first-party-actions` | JSON array of first-party actions (actions/\*, github/\*, octokit/\*) |
+| `all-passed`          | Boolean indicating if all checks passed                               |
+| `workflows-checked`   | List of workflow files that were checked                              |
 
 ## Examples
 
