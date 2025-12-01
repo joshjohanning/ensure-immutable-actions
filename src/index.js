@@ -445,7 +445,7 @@ export async function run() {
       // Create summary
       try {
         await core.summary
-          .addHeading('✅ Immutable Actions Check - All Passed')
+          .addRaw('# ✅ Immutable Actions Check - All Passed\n\n')
           .addRaw(`No actions found in checked workflows.`)
           .write();
       } catch {
@@ -475,13 +475,13 @@ export async function run() {
       let summary = core.summary;
 
       if (mutable.length === 0) {
-        summary = summary.addHeading('✅ Immutable Actions Check - All Passed');
+        summary = summary.addRaw('# ✅ Immutable Actions Check - All Passed\n\n');
       } else {
-        summary = summary.addHeading('❌ Immutable Actions Check - Failed');
+        summary = summary.addRaw('# ❌ Immutable Actions Check - Failed\n\n');
       }
 
       summary = summary
-        .addRaw(`\n**Workflows Checked:** ${workflowBasenames.join(', ')}\n\n`)
+        .addRaw(`**Workflows Checked:** ${workflowBasenames.join(', ')}\n\n`)
         .addRaw(
           `**Summary:** ${firstParty.length} first-party, ${immutable.length} immutable, ${mutable.length} mutable\n\n`
         );
@@ -504,7 +504,7 @@ export async function run() {
         const workflowFirstPartyCount = workflowData.firstParty.length;
         const workflowStatus = workflowMutableCount === 0 ? '✅' : '❌';
 
-        summary = summary.addHeading(`${workflowStatus} ${workflowFile}`, 3);
+        summary = summary.addRaw(`### ${workflowStatus} ${workflowFile}\n\n`);
         summary = summary.addRaw(
           `**Actions:** ${workflowFirstPartyCount} first-party, ${workflowImmutableCount} immutable, ${workflowMutableCount} mutable\n\n`
         );
