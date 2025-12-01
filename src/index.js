@@ -440,6 +440,7 @@ export async function run() {
       core.setOutput('workflows-checked', JSON.stringify(workflowBasenames));
       core.setOutput('mutable-actions', '[]');
       core.setOutput('immutable-actions', '[]');
+      core.setOutput('first-party-actions', '[]');
 
       // Create summary
       try {
