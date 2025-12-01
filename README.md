@@ -11,7 +11,31 @@ A GitHub Action that validates third-party actions in your workflows are using i
 
 ## What it does
 
-This action scans your workflow files and ensures that all third-party actions (excluding `actions/*`, `github/*`, and `octokit/*` organizations which already publish immutable releases) are referencing immutable releases. This prevents supply chain attacks where a release could be modified after you've started using it.
+This action scans your workflow files and reports on all actions, including first-party actions (`actions/*`, `github/*`, and `octokit/*` organizations) and third-party actions. It validates that third-party actions are using immutable releases, which prevents supply chain attacks where a release could be modified after you've started using it.
+
+## Example Output
+
+The action generates a report organized by workflow, making it easy to identify which workflows need attention:
+
+### ✅ ci.yml
+
+**Actions:** 2 first-party, 1 immutable, 0 mutable
+
+| Action                                                         | Status         | Message            |
+| -------------------------------------------------------------- | -------------- | ------------------ |
+| actions/checkout@v4                                            | ✅ First-party | First-party action |
+| actions/setup-node@v4                                          | ✅ First-party | First-party action |
+| [owner/repo@v1.2.3](https://github.com/owner/repo/tree/v1.2.3) | ✅ Immutable   | Immutable release  |
+
+### ❌ deploy.yml
+
+**Actions:** 0 first-party, 1 immutable, 2 mutable
+
+| Action                                                                             | Status       | Message                             |
+| ---------------------------------------------------------------------------------- | ------------ | ----------------------------------- |
+| [owner/secure-action@v2.0.0](https://github.com/owner/secure-action/tree/v2.0.0)   | ✅ Immutable | Immutable release                   |
+| [owner/mutable-action@v1](https://github.com/owner/mutable-action/tree/v1)         | ❌ Mutable   | No release found for this reference |
+| [owner/another-action@v2.1.0](https://github.com/owner/another-action/tree/v2.1.0) | ❌ Mutable   | Mutable release                     |
 
 ## Usage
 
@@ -65,12 +89,13 @@ jobs:
 
 ## Outputs
 
-| Output              | Description                                    |
-| ------------------- | ---------------------------------------------- |
-| `mutable-actions`   | JSON array of actions using mutable releases   |
-| `immutable-actions` | JSON array of actions using immutable releases |
-| `all-passed`        | Boolean indicating if all checks passed        |
-| `workflows-checked` | List of workflow files that were checked       |
+| Output                | Description                                                           |
+| --------------------- | --------------------------------------------------------------------- |
+| `mutable-actions`     | JSON array of actions using mutable releases                          |
+| `immutable-actions`   | JSON array of actions using immutable releases                        |
+| `first-party-actions` | JSON array of first-party actions (actions/\*, github/\*, octokit/\*) |
+| `all-passed`          | Boolean indicating if all checks passed                               |
+| `workflows-checked`   | List of workflow files that were checked                              |
 
 ## Examples
 

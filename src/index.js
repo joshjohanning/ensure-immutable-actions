@@ -100,6 +100,7 @@ export function extractActionsFromWorkflow(workflowPath) {
   try {
     const content = fs.readFileSync(workflowPath, 'utf8');
     const workflow = YAML.parse(content);
+    const workflowFile = path.basename(workflowPath);
 
     const actions = [];
     const jobs = workflow?.jobs || {};
@@ -109,12 +110,15 @@ export function extractActionsFromWorkflow(workflowPath) {
       for (const step of steps) {
         if (step?.uses) {
           const parsed = parseActionReference(step.uses);
-          if (parsed && !shouldExcludeAction(parsed.owner)) {
+          if (parsed) {
+            const isFirstParty = shouldExcludeAction(parsed.owner);
             actions.push({
               uses: step.uses,
               ...parsed,
+              workflowFile,
               jobName,
-              stepName: step.name || 'unnamed step'
+              stepName: step.name || 'unnamed step',
+              isFirstParty
             });
           }
         }
@@ -192,6 +196,26 @@ export function isFullSHA(ref) {
 }
 
 /**
+ * Format action reference with hyperlink to GitHub
+ * @param {string} owner - Repository owner
+ * @param {string} repo - Repository name
+ * @param {string} ref - Git ref (tag, SHA, branch)
+ * @returns {string} Markdown formatted action reference with link
+ */
+export function formatActionReference(owner, repo, ref) {
+  const actionRef = `${owner}/${repo}@${ref}`;
+
+  // SHAs already get hyperlinked by GitHub automatically, so just return plain text
+  if (isFullSHA(ref)) {
+    return actionRef;
+  }
+
+  // For tags and branches, create a hyperlink to the repository
+  const url = `https://github.com/${owner}/${repo}/tree/${ref}`;
+  return `[${actionRef}](${url})`;
+}
+
+/**
  * Check if a release is immutable via GitHub API
  * Note: The 'immutable' property is a GitHub feature that indicates whether a release
  * can be modified or deleted. This only applies to tag-based releases.
@@ -255,25 +279,59 @@ export async function checkReleaseImmutability(octokit, owner, repo, ref) {
  * Check all actions from workflows
  * @param {Octokit} octokit - Octokit instance
  * @param {Array} actions - Array of action references
- * @returns {Promise<Object>} { mutable: Array, immutable: Array }
+ * @returns {Promise<Object>} { mutable: Array, immutable: Array, firstParty: Array, byWorkflow: Object }
  */
 export async function checkAllActions(octokit, actions) {
   const mutable = [];
   const immutable = [];
+  const firstParty = [];
+  const byWorkflow = {};
 
-  // Deduplicate actions by uses string
-  const uniqueActions = Array.from(new Map(actions.map(a => [a.uses, a])).values());
+  // Separate first-party actions from third-party actions
+  const thirdPartyActions = actions.filter(a => !a.isFirstParty);
+  const firstPartyActions = actions.filter(a => a.isFirstParty);
+
+  // Create a cache for immutability results
+  const immutabilityCache = new Map();
+
+  // Process first-party actions (no API check needed) - deduplicate by uses string
+  const uniqueFirstPartyActions = Array.from(new Map(firstPartyActions.map(a => [a.uses, a])).values());
+  for (const action of uniqueFirstPartyActions) {
+    const actionInfo = {
+      uses: action.uses,
+      owner: action.owner,
+      repo: action.repo,
+      ref: action.ref,
+      isFirstParty: true,
+      immutable: true,
+      releaseFound: false,
+      message: 'First-party action'
+    };
+    firstParty.push(actionInfo);
+
+    // Cache result for workflow grouping
+    immutabilityCache.set(action.uses, {
+      immutable: true,
+      releaseFound: false,
+      message: 'First-party action'
+    });
+  }
+
+  // Deduplicate third-party actions by uses string for API calls, but preserve workflow info
+  const uniqueActions = Array.from(new Map(thirdPartyActions.map(a => [a.uses, a])).values());
 
   for (const action of uniqueActions) {
     core.info(`Checking ${action.owner}/${action.repo}@${action.ref}...`);
 
     const result = await checkReleaseImmutability(octokit, action.owner, action.repo, action.ref);
+    immutabilityCache.set(action.uses, result);
 
     const actionInfo = {
       uses: action.uses,
       owner: action.owner,
       repo: action.repo,
       ref: action.ref,
+      isFirstParty: false,
       ...result
     };
 
@@ -284,7 +342,47 @@ export async function checkAllActions(octokit, actions) {
     }
   }
 
-  return { mutable, immutable };
+  // Group all actions by workflow (deduplicate within each workflow)
+  // First, group actions by workflow file
+  const actionsByWorkflow = {};
+  for (const action of actions) {
+    const workflowFile = action.workflowFile;
+    if (!actionsByWorkflow[workflowFile]) {
+      actionsByWorkflow[workflowFile] = [];
+    }
+    actionsByWorkflow[workflowFile].push(action);
+  }
+
+  // Then, deduplicate within each workflow and categorize
+  for (const [workflowFile, workflowActions] of Object.entries(actionsByWorkflow)) {
+    byWorkflow[workflowFile] = { mutable: [], immutable: [], firstParty: [] };
+
+    // Deduplicate by uses string within this workflow
+    const uniqueWorkflowActions = Array.from(new Map(workflowActions.map(a => [a.uses, a])).values());
+
+    for (const action of uniqueWorkflowActions) {
+      const cachedResult = immutabilityCache.get(action.uses);
+      const actionInfo = {
+        uses: action.uses,
+        owner: action.owner,
+        repo: action.repo,
+        ref: action.ref,
+        workflowFile: action.workflowFile,
+        isFirstParty: action.isFirstParty || false,
+        ...cachedResult
+      };
+
+      if (action.isFirstParty) {
+        byWorkflow[workflowFile].firstParty.push(actionInfo);
+      } else if (cachedResult.immutable) {
+        byWorkflow[workflowFile].immutable.push(actionInfo);
+      } else {
+        byWorkflow[workflowFile].mutable.push(actionInfo);
+      }
+    }
+  }
+
+  return { mutable, immutable, firstParty, byWorkflow };
 }
 
 /**
@@ -332,25 +430,26 @@ export async function run() {
       const basename = path.basename(workflowFile);
       core.info(`Parsing workflow: ${basename}`);
       const actions = extractActionsFromWorkflow(workflowFile);
-      core.info(`  Found ${actions.length} third-party action(s)`);
+      core.info(`  Found ${actions.length} action(s)`);
       allActions.push(...actions);
     }
 
     if (allActions.length === 0) {
-      core.info('No third-party actions found in workflows');
+      core.info('No actions found in workflows');
       core.setOutput('all-passed', true);
       core.setOutput('workflows-checked', JSON.stringify(workflowBasenames));
       core.setOutput('mutable-actions', '[]');
       core.setOutput('immutable-actions', '[]');
+      core.setOutput('first-party-actions', '[]');
 
       // Create summary
       try {
         await core.summary
           .addHeading('✅ Immutable Actions Check - All Passed')
-          .addRaw(`No third-party actions found in checked workflows.`)
+          .addRaw(`No actions found in checked workflows.`)
           .write();
       } catch {
-        core.info('✅ All checks passed (no third-party actions found)');
+        core.info('✅ All checks passed (no actions found)');
       }
 
       return;
@@ -362,34 +461,16 @@ export async function run() {
     const octokit = new Octokit({ auth: githubToken });
 
     // Check all actions
-    const { mutable, immutable } = await checkAllActions(octokit, allActions);
+    const { mutable, immutable, firstParty, byWorkflow } = await checkAllActions(octokit, allActions);
 
     // Set outputs
     core.setOutput('workflows-checked', JSON.stringify(workflowBasenames));
     core.setOutput('mutable-actions', JSON.stringify(mutable));
     core.setOutput('immutable-actions', JSON.stringify(immutable));
+    core.setOutput('first-party-actions', JSON.stringify(firstParty));
     core.setOutput('all-passed', mutable.length === 0);
 
-    // Create summary table
-    const summaryRows = [
-      [
-        { data: 'Action', header: true },
-        { data: 'Status', header: true },
-        { data: 'Message', header: true }
-      ]
-    ];
-
-    // Add immutable actions
-    for (const action of immutable) {
-      summaryRows.push([`${action.owner}/${action.repo}@${action.ref}`, '✅ Immutable', action.message]);
-    }
-
-    // Add mutable actions
-    for (const action of mutable) {
-      summaryRows.push([`${action.owner}/${action.repo}@${action.ref}`, '❌ Mutable', action.message]);
-    }
-
-    // Create summary
+    // Create summary with separate tables per workflow
     try {
       let summary = core.summary;
 
@@ -401,14 +482,66 @@ export async function run() {
 
       summary = summary
         .addRaw(`\n**Workflows Checked:** ${workflowBasenames.join(', ')}\n\n`)
-        .addRaw(`**Summary:** ${immutable.length} immutable, ${mutable.length} mutable\n\n`)
-        .addTable(summaryRows);
+        .addRaw(
+          `**Summary:** ${firstParty.length} first-party, ${immutable.length} immutable, ${mutable.length} mutable\n\n`
+        );
+
+      // Add a table for each workflow
+      for (const workflowFile of workflowBasenames) {
+        const workflowData = byWorkflow[workflowFile];
+
+        if (
+          !workflowData ||
+          (workflowData.immutable.length === 0 &&
+            workflowData.mutable.length === 0 &&
+            workflowData.firstParty.length === 0)
+        ) {
+          continue;
+        }
+
+        const workflowMutableCount = workflowData.mutable.length;
+        const workflowImmutableCount = workflowData.immutable.length;
+        const workflowFirstPartyCount = workflowData.firstParty.length;
+        const workflowStatus = workflowMutableCount === 0 ? '✅' : '❌';
+
+        summary = summary.addHeading(`${workflowStatus} ${workflowFile}`, 3);
+        summary = summary.addRaw(
+          `**Actions:** ${workflowFirstPartyCount} first-party, ${workflowImmutableCount} immutable, ${workflowMutableCount} mutable\n\n`
+        );
+
+        // Build markdown table
+        let markdownTable = '| Action | Status | Message |\n';
+        markdownTable += '|--------|--------|----------|\n';
+
+        // Use concatenation order: first-party, then immutable, then mutable
+        const sortedActions = [...workflowData.firstParty, ...workflowData.immutable, ...workflowData.mutable];
+
+        for (const action of sortedActions) {
+          let status;
+          let message;
+          if (action.isFirstParty) {
+            status = '✅ First-party';
+            message = action.message;
+          } else if (action.immutable) {
+            status = '✅ Immutable';
+            message = action.message;
+          } else {
+            status = '❌ Mutable';
+            message = action.message;
+          }
+          const actionRef = formatActionReference(action.owner, action.repo, action.ref);
+          markdownTable += `| ${actionRef} | ${status} | ${message} |\n`;
+        }
+
+        summary = summary.addRaw(markdownTable).addRaw('\n');
+      }
 
       await summary.write();
     } catch {
       // Fallback for local development
       core.info('📊 Immutable Actions Check Results:');
       core.info(`   Workflows: ${workflowBasenames.join(', ')}`);
+      core.info(`   First-party: ${firstParty.length}`);
       core.info(`   Immutable: ${immutable.length}`);
       core.info(`   Mutable: ${mutable.length}`);
     }

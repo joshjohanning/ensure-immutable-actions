@@ -49,7 +49,8 @@ const {
   checkAllActions,
   getInput,
   getBooleanInput,
-  isFullSHA
+  isFullSHA,
+  formatActionReference
 } = await import('../src/index.js');
 
 describe('Ensure Immutable Actions', () => {
@@ -158,14 +159,28 @@ jobs:
 
       const actions = extractActionsFromWorkflow(tempFile);
 
-      // Should only include third-party actions (not actions/*)
-      expect(actions).toHaveLength(2);
-      expect(actions[0].owner).toBe('joshjohanning');
-      expect(actions[0].repo).toBe('npm-version-check-action');
-      expect(actions[0].ref).toBe('v1');
-      expect(actions[0].stepName).toBe('Check npm version');
+      // Should now include all actions (first-party and third-party)
+      expect(actions).toHaveLength(3);
 
-      expect(actions[1].owner).toBe('third-party');
+      // First action should be first-party
+      expect(actions[0].owner).toBe('actions');
+      expect(actions[0].repo).toBe('checkout');
+      expect(actions[0].ref).toBe('v4');
+      expect(actions[0].isFirstParty).toBe(true);
+      expect(actions[0].workflowFile).toBe('test-workflow.yml');
+
+      // Second action should be third-party
+      expect(actions[1].owner).toBe('joshjohanning');
+      expect(actions[1].repo).toBe('npm-version-check-action');
+      expect(actions[1].ref).toBe('v1');
+      expect(actions[1].stepName).toBe('Check npm version');
+      expect(actions[1].isFirstParty).toBe(false);
+      expect(actions[1].workflowFile).toBe('test-workflow.yml');
+
+      // Third action should be third-party
+      expect(actions[2].owner).toBe('third-party');
+      expect(actions[2].isFirstParty).toBe(false);
+      expect(actions[2].workflowFile).toBe('test-workflow.yml');
 
       fs.unlinkSync(tempFile);
     });
@@ -295,6 +310,25 @@ jobs:
     });
   });
 
+  describe('formatActionReference', () => {
+    test('should not add hyperlink for full SHA references', () => {
+      const result = formatActionReference('owner', 'repo', '1234567890abcdef1234567890abcdef12345678');
+      expect(result).toBe('owner/repo@1234567890abcdef1234567890abcdef12345678');
+      expect(result).not.toContain('[');
+      expect(result).not.toContain('](');
+    });
+
+    test('should add hyperlink for tag references', () => {
+      const result = formatActionReference('owner', 'repo', 'v1.0.0');
+      expect(result).toBe('[owner/repo@v1.0.0](https://github.com/owner/repo/tree/v1.0.0)');
+    });
+
+    test('should add hyperlink for branch references', () => {
+      const result = formatActionReference('owner', 'repo', 'main');
+      expect(result).toBe('[owner/repo@main](https://github.com/owner/repo/tree/main)');
+    });
+  });
+
   describe('checkReleaseImmutability', () => {
     test('should return immutable true for full SHA references', async () => {
       const result = await checkReleaseImmutability(
@@ -380,19 +414,22 @@ jobs:
           uses: 'owner1/repo1@v1',
           owner: 'owner1',
           repo: 'repo1',
-          ref: 'v1'
+          ref: 'v1',
+          workflowFile: 'workflow1.yml'
         },
         {
           uses: 'owner2/repo2@v2',
           owner: 'owner2',
           repo: 'repo2',
-          ref: 'v2'
+          ref: 'v2',
+          workflowFile: 'workflow1.yml'
         },
         {
           uses: 'owner3/repo3@v3',
           owner: 'owner3',
           repo: 'repo3',
-          ref: 'v3'
+          ref: 'v3',
+          workflowFile: 'workflow2.yml'
         }
       ];
 
@@ -408,6 +445,15 @@ jobs:
       expect(result.immutable[0].owner).toBe('owner1');
       expect(result.mutable[0].owner).toBe('owner2');
       expect(result.mutable[1].owner).toBe('owner3');
+
+      // Check byWorkflow grouping
+      expect(result.byWorkflow).toBeDefined();
+      expect(result.byWorkflow['workflow1.yml']).toBeDefined();
+      expect(result.byWorkflow['workflow1.yml'].immutable).toHaveLength(1);
+      expect(result.byWorkflow['workflow1.yml'].mutable).toHaveLength(1);
+      expect(result.byWorkflow['workflow2.yml']).toBeDefined();
+      expect(result.byWorkflow['workflow2.yml'].immutable).toHaveLength(0);
+      expect(result.byWorkflow['workflow2.yml'].mutable).toHaveLength(1);
     });
 
     test('should deduplicate actions by uses string', async () => {
@@ -416,19 +462,22 @@ jobs:
           uses: 'owner/repo@v1',
           owner: 'owner',
           repo: 'repo',
-          ref: 'v1'
+          ref: 'v1',
+          workflowFile: 'workflow1.yml'
         },
         {
           uses: 'owner/repo@v1',
           owner: 'owner',
           repo: 'repo',
-          ref: 'v1'
+          ref: 'v1',
+          workflowFile: 'workflow1.yml'
         },
         {
           uses: 'owner/repo@v2',
           owner: 'owner',
           repo: 'repo',
-          ref: 'v2'
+          ref: 'v2',
+          workflowFile: 'workflow2.yml'
         }
       ];
 
@@ -440,6 +489,171 @@ jobs:
 
       // Should only call API twice (for v1 and v2), not three times
       expect(mockOctokit.rest.repos.getReleaseByTag).toHaveBeenCalledTimes(2);
+    });
+
+    test('should group same action appearing in multiple workflows', async () => {
+      const actions = [
+        {
+          uses: 'owner/repo@v1',
+          owner: 'owner',
+          repo: 'repo',
+          ref: 'v1',
+          workflowFile: 'workflow1.yml'
+        },
+        {
+          uses: 'owner/repo@v1',
+          owner: 'owner',
+          repo: 'repo',
+          ref: 'v1',
+          workflowFile: 'workflow2.yml'
+        }
+      ];
+
+      mockOctokit.rest.repos.getReleaseByTag.mockResolvedValue({
+        data: { immutable: true }
+      });
+
+      const result = await checkAllActions(mockOctokit, actions);
+
+      // Should only call API once (same action)
+      expect(mockOctokit.rest.repos.getReleaseByTag).toHaveBeenCalledTimes(1);
+
+      // But should appear in both workflows
+      expect(result.byWorkflow['workflow1.yml'].immutable).toHaveLength(1);
+      expect(result.byWorkflow['workflow2.yml'].immutable).toHaveLength(1);
+    });
+
+    test('should handle first-party actions without API calls', async () => {
+      const actions = [
+        {
+          uses: 'actions/checkout@v4',
+          owner: 'actions',
+          repo: 'checkout',
+          ref: 'v4',
+          workflowFile: 'workflow1.yml',
+          isFirstParty: true
+        },
+        {
+          uses: 'owner/repo@v1',
+          owner: 'owner',
+          repo: 'repo',
+          ref: 'v1',
+          workflowFile: 'workflow1.yml',
+          isFirstParty: false
+        }
+      ];
+
+      mockOctokit.rest.repos.getReleaseByTag.mockResolvedValue({
+        data: { immutable: true }
+      });
+
+      const result = await checkAllActions(mockOctokit, actions);
+
+      // Should only call API once (for third-party action)
+      expect(mockOctokit.rest.repos.getReleaseByTag).toHaveBeenCalledTimes(1);
+
+      // First-party actions should be in firstParty array
+      expect(result.firstParty).toHaveLength(1);
+      expect(result.firstParty[0].owner).toBe('actions');
+      expect(result.firstParty[0].message).toBe('First-party action');
+      expect(result.firstParty[0].isFirstParty).toBe(true);
+
+      // Third-party action should be in immutable array
+      expect(result.immutable).toHaveLength(1);
+      expect(result.immutable[0].owner).toBe('owner');
+
+      // Check byWorkflow grouping includes firstParty
+      expect(result.byWorkflow['workflow1.yml'].firstParty).toHaveLength(1);
+      expect(result.byWorkflow['workflow1.yml'].immutable).toHaveLength(1);
+    });
+
+    test('should deduplicate same action used multiple times within a workflow', async () => {
+      const actions = [
+        {
+          uses: 'owner/repo@v1',
+          owner: 'owner',
+          repo: 'repo',
+          ref: 'v1',
+          workflowFile: 'workflow1.yml',
+          isFirstParty: false
+        },
+        {
+          uses: 'owner/repo@v1',
+          owner: 'owner',
+          repo: 'repo',
+          ref: 'v1',
+          workflowFile: 'workflow1.yml',
+          isFirstParty: false
+        },
+        {
+          uses: 'owner/repo@v1',
+          owner: 'owner',
+          repo: 'repo',
+          ref: 'v1',
+          workflowFile: 'workflow1.yml',
+          isFirstParty: false
+        }
+      ];
+
+      mockOctokit.rest.repos.getReleaseByTag.mockResolvedValue({
+        data: { immutable: true }
+      });
+
+      const result = await checkAllActions(mockOctokit, actions);
+
+      // Should only call API once (same action)
+      expect(mockOctokit.rest.repos.getReleaseByTag).toHaveBeenCalledTimes(1);
+
+      // Global array should have 1 entry (deduplicated across all)
+      expect(result.immutable).toHaveLength(1);
+
+      // byWorkflow should also have 1 entry (deduplicated within workflow)
+      expect(result.byWorkflow['workflow1.yml'].immutable).toHaveLength(1);
+      expect(result.byWorkflow['workflow1.yml'].immutable[0].uses).toBe('owner/repo@v1');
+    });
+
+    test('should deduplicate first-party actions within a workflow', async () => {
+      const actions = [
+        {
+          uses: 'actions/checkout@v4',
+          owner: 'actions',
+          repo: 'checkout',
+          ref: 'v4',
+          workflowFile: 'ci.yml',
+          isFirstParty: true
+        },
+        {
+          uses: 'actions/checkout@v4',
+          owner: 'actions',
+          repo: 'checkout',
+          ref: 'v4',
+          workflowFile: 'ci.yml',
+          isFirstParty: true
+        },
+        {
+          uses: 'actions/setup-node@v4',
+          owner: 'actions',
+          repo: 'setup-node',
+          ref: 'v4',
+          workflowFile: 'ci.yml',
+          isFirstParty: true
+        }
+      ];
+
+      const result = await checkAllActions(mockOctokit, actions);
+
+      // Should not call API for first-party actions
+      expect(mockOctokit.rest.repos.getReleaseByTag).not.toHaveBeenCalled();
+
+      // Global firstParty array should have 2 unique entries
+      expect(result.firstParty).toHaveLength(2);
+      expect(result.firstParty[0].uses).toBe('actions/checkout@v4');
+      expect(result.firstParty[1].uses).toBe('actions/setup-node@v4');
+
+      // byWorkflow should also have 2 unique entries (deduplicated within workflow)
+      expect(result.byWorkflow['ci.yml'].firstParty).toHaveLength(2);
+      expect(result.byWorkflow['ci.yml'].firstParty[0].uses).toBe('actions/checkout@v4');
+      expect(result.byWorkflow['ci.yml'].firstParty[1].uses).toBe('actions/setup-node@v4');
     });
   });
 
@@ -584,7 +798,7 @@ jobs:
       expect(mockCore.setOutput).toHaveBeenCalledWith('all-passed', true);
     });
 
-    test('should handle workflows with no third-party actions', async () => {
+    test('should handle workflows with only first-party actions', async () => {
       // Create workflow with only actions/* actions
       const workflowContent = `
 name: CI
@@ -600,7 +814,8 @@ jobs:
 
       await run();
 
-      expect(mockCore.info).toHaveBeenCalledWith(expect.stringContaining('No third-party actions found'));
+      // Should now process first-party actions
+      expect(mockCore.info).not.toHaveBeenCalledWith(expect.stringContaining('No third-party actions found'));
       expect(mockCore.setOutput).toHaveBeenCalledWith('all-passed', true);
     });
   });
