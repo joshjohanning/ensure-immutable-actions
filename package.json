@@ -1,7 +1,7 @@
 {
   "name": "ensure-immutable-actions",
   "description": "🛡️ GitHub Action that validates third-party actions in your workflows are using immutable releases",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "type": "module",
   "author": {
     "name": "Josh Johanning",
@@ -44,8 +44,8 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@actions/core": "^2.0.1",
-    "@actions/github": "^6.0.1",
+    "@actions/core": "^2.0.2",
+    "@actions/github": "^7.0.0",
     "@octokit/rest": "^22.0.1",
     "yaml": "^2.8.2"
   },
