@@ -58,7 +58,7 @@ jobs:
   check-immutable:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Ensure immutable actions
         uses: joshjohanning/ensure-immutable-actions@v2
