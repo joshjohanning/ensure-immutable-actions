@@ -9,6 +9,10 @@
 
 A GitHub Action that validates third-party actions in your workflows are using immutable releases, enhancing supply chain security.
 
+## What's new
+
+Please refer to the [release page](https://github.com/joshjohanning/ensure-immutable-actions/releases) for the latest release notes.
+
 ## What it does
 
 This action scans your workflow files and reports on all actions, including first-party actions (`actions/*`, `github/*`, and `octokit/*` organizations) and third-party actions. It validates that third-party actions are using immutable releases, which prevents supply chain attacks where a release could be modified after you've started using it.
@@ -54,17 +58,17 @@ jobs:
   check-immutable:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Ensure immutable actions
-        uses: joshjohanning/ensure-immutable-actions@v1
+        uses: joshjohanning/ensure-immutable-actions@v2
 ```
 
 ### Check specific workflows only
 
 ```yaml
 - name: Ensure immutable actions
-  uses: joshjohanning/ensure-immutable-actions@v1
+  uses: joshjohanning/ensure-immutable-actions@v2
   with:
     workflows: 'ci.yml,deploy.yml,release.yml'
 ```
@@ -73,7 +77,7 @@ jobs:
 
 ```yaml
 - name: Ensure immutable actions
-  uses: joshjohanning/ensure-immutable-actions@v1
+  uses: joshjohanning/ensure-immutable-actions@v2
   with:
     exclude-workflows: 'experimental.yml,temp-workflow.yml'
 ```
@@ -102,7 +106,7 @@ jobs:
 ### Fail on any mutable action
 
 ```yaml
-- uses: joshjohanning/ensure-immutable-actions@v1
+- uses: joshjohanning/ensure-immutable-actions@v2
   with:
     fail-on-mutable: true # This is the default
 ```
@@ -110,7 +114,7 @@ jobs:
 ### Report only (don't fail)
 
 ```yaml
-- uses: joshjohanning/ensure-immutable-actions@v1
+- uses: joshjohanning/ensure-immutable-actions@v2
   with:
     fail-on-mutable: false
 ```
@@ -118,7 +122,7 @@ jobs:
 ### Check only CI/CD workflows
 
 ```yaml
-- uses: joshjohanning/ensure-immutable-actions@v1
+- uses: joshjohanning/ensure-immutable-actions@v2
   with:
     workflows: 'ci.yml,cd.yml,build.yml'
 ```
