@@ -47,7 +47,7 @@
     "@actions/core": "^3.0.0",
     "@actions/github": "^9.0.0",
     "@octokit/rest": "^22.0.1",
-    "yaml": "^2.8.2"
+    "yaml": "^2.8.3"
   },
   "devDependencies": {
     "@joshjohanning/make-coverage-badge-better": "^1.0.1",
