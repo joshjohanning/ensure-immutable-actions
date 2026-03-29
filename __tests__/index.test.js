@@ -59,10 +59,10 @@ describe('Ensure Immutable Actions', () => {
     mockOctokit.rest.repos.getReleaseByTag.mockClear();
 
     // Set default inputs
+    mockCore.getBooleanInput.mockReturnValue(true);
     mockCore.getInput.mockImplementation(name => {
       const inputs = {
         'github-token': 'test-token',
-        'fail-on-mutable': 'true',
         workflows: '',
         'exclude-workflows': ''
       };
@@ -703,10 +703,10 @@ jobs:
     });
 
     test('should fail with mutable actions when fail-on-mutable is true', async () => {
+      mockCore.getBooleanInput.mockReturnValue(true);
       mockCore.getInput.mockImplementation(name => {
         const inputs = {
-          'github-token': 'test-token',
-          'fail-on-mutable': 'true'
+          'github-token': 'test-token'
         };
         return inputs[name] || '';
       });
@@ -722,10 +722,10 @@ jobs:
     });
 
     test('should not fail with mutable actions when fail-on-mutable is false', async () => {
+      mockCore.getBooleanInput.mockReturnValue(false);
       mockCore.getInput.mockImplementation(name => {
         const inputs = {
-          'github-token': 'test-token',
-          'fail-on-mutable': 'false'
+          'github-token': 'test-token'
         };
         return inputs[name] || '';
       });

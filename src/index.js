@@ -360,7 +360,7 @@ export async function run() {
   try {
     // Get inputs
     const githubToken = core.getInput('github-token');
-    const failOnMutable = core.getInput('fail-on-mutable') === 'true';
+    const failOnMutable = core.getBooleanInput('fail-on-mutable');
     const workflowsInput = core.getInput('workflows');
     const excludeWorkflowsInput = core.getInput('exclude-workflows');
 
