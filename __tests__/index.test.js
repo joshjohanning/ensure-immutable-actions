@@ -47,8 +47,6 @@ const {
   getWorkflowFiles,
   checkReleaseImmutability,
   checkAllActions,
-  getInput,
-  getBooleanInput,
   isFullSHA,
   formatActionReference
 } = await import('../src/index.js');
@@ -654,42 +652,6 @@ jobs:
       expect(result.byWorkflow['ci.yml'].firstParty).toHaveLength(2);
       expect(result.byWorkflow['ci.yml'].firstParty[0].uses).toBe('actions/checkout@v4');
       expect(result.byWorkflow['ci.yml'].firstParty[1].uses).toBe('actions/setup-node@v4');
-    });
-  });
-
-  describe('getInput and getBooleanInput', () => {
-    test('getInput should work with core.getInput', () => {
-      mockCore.getInput.mockReturnValue('test-value');
-      expect(getInput('test-input')).toBe('test-value');
-    });
-
-    test('getInput should fallback to environment variable', () => {
-      mockCore.getInput.mockReturnValue('');
-      process.env.INPUT_TEST_INPUT = 'env-value';
-      expect(getInput('test-input')).toBe('env-value');
-      delete process.env.INPUT_TEST_INPUT;
-    });
-
-    test('getBooleanInput should handle true values', () => {
-      mockCore.getInput.mockReturnValue('true');
-      expect(getBooleanInput('test')).toBe(true);
-
-      mockCore.getInput.mockReturnValue('1');
-      expect(getBooleanInput('test')).toBe(true);
-
-      mockCore.getInput.mockReturnValue('yes');
-      expect(getBooleanInput('test')).toBe(true);
-    });
-
-    test('getBooleanInput should handle false values', () => {
-      mockCore.getInput.mockReturnValue('false');
-      expect(getBooleanInput('test')).toBe(false);
-
-      mockCore.getInput.mockReturnValue('0');
-      expect(getBooleanInput('test')).toBe(false);
-
-      mockCore.getInput.mockReturnValue('');
-      expect(getBooleanInput('test')).toBe(false);
     });
   });
 

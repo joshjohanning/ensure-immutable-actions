@@ -4,18 +4,14 @@
  *
  * Local Development & Testing:
  *
- * 1. Set environment variables to simulate GitHub Actions inputs:
- *    export INPUT_GITHUB_TOKEN="ghp_your_token_here"
- *    export INPUT_FAIL_ON_MUTABLE="true"
- *    export INPUT_WORKFLOWS="ci.yml,deploy.yml"  # Optional: specific workflows
- *    export INPUT_EXCLUDE_WORKFLOWS="experimental.yml"  # Optional: workflows to exclude
+ * Uses core.getInput() which reads INPUT_<NAME> env vars (hyphens preserved).
+ * Since shell variables can't contain hyphens, use env(1) or inline assignment:
  *
- * 2. Set GitHub context environment variables:
+ *    env 'INPUT_GITHUB-TOKEN=ghp_xxx' 'INPUT_FAIL-ON-MUTABLE=true' node src/index.js
+ *
+ * Set GitHub context environment variables:
  *    export GITHUB_REPOSITORY="owner/repo-name"
  *    export GITHUB_WORKSPACE="/path/to/repo"
- *
- * 3. Run locally:
- *    node src/index.js
  */
 
 import * as core from '@actions/core';
@@ -23,34 +19,6 @@ import { Octokit } from '@octokit/rest';
 import * as fs from 'fs';
 import * as path from 'path';
 import YAML from 'yaml';
-
-/**
- * Get input value (works reliably in both GitHub Actions and local environments)
- * @param {string} name - Input name (with dashes)
- * @returns {string} Input value
- */
-export function getInput(name) {
-  // Try core.getInput first (works in GitHub Actions)
-  let value = core.getInput(name);
-
-  // Fallback: try direct environment variable access (for local development)
-  if (!value) {
-    const envName = `INPUT_${name.replace(/-/g, '_').toUpperCase()}`;
-    value = process.env[envName] || '';
-  }
-
-  return value;
-}
-
-/**
- * Convert string input to boolean (more permissive than core.getBooleanInput)
- * @param {string} name - Input name
- * @returns {boolean} Boolean value
- */
-export function getBooleanInput(name) {
-  const input = getInput(name).toLowerCase();
-  return input === 'true' || input === '1' || input === 'yes';
-}
 
 /**
  * Parse action reference from uses: field
@@ -391,10 +359,10 @@ export async function checkAllActions(octokit, actions) {
 export async function run() {
   try {
     // Get inputs
-    const githubToken = getInput('github-token');
-    const failOnMutable = getBooleanInput('fail-on-mutable');
-    const workflowsInput = getInput('workflows');
-    const excludeWorkflowsInput = getInput('exclude-workflows');
+    const githubToken = core.getInput('github-token');
+    const failOnMutable = core.getInput('fail-on-mutable') === 'true';
+    const workflowsInput = core.getInput('workflows');
+    const excludeWorkflowsInput = core.getInput('exclude-workflows');
 
     if (!githubToken) {
       core.setFailed('github-token is required (defaults to github.token)');
