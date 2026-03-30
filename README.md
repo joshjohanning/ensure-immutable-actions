@@ -149,6 +149,9 @@ jobs:
 5. **Reports Results**: Creates a summary with all findings
 6. **Optionally Fails**: If `fail-on-mutable` is true, fails the workflow when mutable actions are found
 
+> [!NOTE]
+> This action always checks immutability against the github.com API, since that is where marketplace actions are published. It is not designed for use with GHES API URLs.
+
 ## What's Considered Immutable?
 
 - ✅ **Full 40-character SHA**: `user/action@1234567890abcdef1234567890abcdef12345678` - Cryptographic hash that cannot change
