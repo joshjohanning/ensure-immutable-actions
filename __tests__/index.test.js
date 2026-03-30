@@ -863,5 +863,41 @@ jobs:
       expect(mockCore.info).not.toHaveBeenCalledWith(expect.stringContaining('No third-party actions found'));
       expect(mockCore.setOutput).toHaveBeenCalledWith('all-passed', true);
     });
+
+    test('should check first-party actions when include-first-party is true', async () => {
+      mockCore.getBooleanInput.mockImplementation(name => {
+        if (name === 'fail-on-mutable') return true;
+        if (name === 'include-first-party') return true;
+        return true;
+      });
+
+      // Create workflow with only first-party actions
+      const workflowContent = `
+name: CI
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+`;
+      fs.writeFileSync(path.join(testWorkflowsDir, 'ci.yml'), workflowContent);
+
+      mockOctokit.rest.repos.getReleaseByTag.mockResolvedValue({
+        data: { immutable: false }
+      });
+
+      await run();
+
+      // First-party action should be API-checked
+      expect(mockOctokit.rest.repos.getReleaseByTag).toHaveBeenCalledTimes(1);
+
+      // Should fail since the first-party action has a mutable release
+      expect(mockCore.setOutput).toHaveBeenCalledWith('all-passed', false);
+      expect(mockCore.setFailed).toHaveBeenCalled();
+
+      // first-party-actions output should be empty
+      expect(mockCore.setOutput).toHaveBeenCalledWith('first-party-actions', '[]');
+    });
   });
 });
