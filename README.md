@@ -15,7 +15,7 @@ Please refer to the [release page](https://github.com/joshjohanning/ensure-immut
 
 ## What it does
 
-This action scans your workflow files and reports on all actions, including first-party actions (`actions/*`, `github/*`, and `octokit/*` organizations) and third-party actions. It validates that third-party actions are using immutable releases, which prevents supply chain attacks where a release could be modified after you've started using it.
+This action scans your workflow files and validates that third-party actions are using [immutable releases](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository#creating-immutable-releases), which prevents supply chain attacks where a release could be modified after you've started using it. First-party actions (`actions/*`, `github/*`, and `octokit/*`) are excluded from checks by default, but can be included via the `include-first-party` input.
 
 ## Example Output
 
@@ -84,12 +84,13 @@ jobs:
 
 ## Inputs
 
-| Input               | Description                                                                                                                                        | Required | Default               |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | --------------------- |
-| `github-token`      | GitHub token for API calls                                                                                                                         | Yes      | `${{ github.token }}` |
-| `fail-on-mutable`   | Fail the workflow if mutable actions are found                                                                                                     | No       | `true`                |
-| `workflows`         | Specific workflow files to check (comma-separated, e.g., `ci.yml,deploy.yml`). **If not specified, checks ALL workflows in `.github/workflows/`.** | No       | All workflows         |
-| `exclude-workflows` | Workflow files to exclude from checks (comma-separated). Only applies when `workflows` is not specified.                                           | No       | -                     |
+| Input                 | Description                                                                                                                                        | Required | Default               |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | --------------------- |
+| `github-token`        | GitHub token for API calls                                                                                                                         | Yes      | `${{ github.token }}` |
+| `fail-on-mutable`     | Fail the workflow if mutable actions are found                                                                                                     | No       | `true`                |
+| `workflows`           | Specific workflow files to check (comma-separated, e.g., `ci.yml,deploy.yml`). **If not specified, checks ALL workflows in `.github/workflows/`.** | No       | All workflows         |
+| `exclude-workflows`   | Workflow files to exclude from checks (comma-separated). Only applies when `workflows` is not specified.                                           | No       | -                     |
+| `include-first-party` | Include first-party actions (`actions/*`, `github/*`, `octokit/*`) in immutability checks. By default, first-party actions are excluded.           | No       | `false`               |
 
 ## Outputs
 
@@ -127,11 +128,19 @@ jobs:
     workflows: 'ci.yml,cd.yml,build.yml'
 ```
 
+### Include first-party actions in checks
+
+```yaml
+- uses: joshjohanning/ensure-immutable-actions@v2
+  with:
+    include-first-party: true
+```
+
 ## How it Works
 
 1. **Scans Workflows**: Reads all workflow files (or specified ones) from `.github/workflows/`
 2. **Extracts Actions**: Parses YAML to find all `uses:` references to third-party actions
-3. **Filters**: Excludes `actions/*`, `github/*`, and `octokit/*` organizations (these already publish immutable releases)
+3. **Filters**: Excludes `actions/*`, `github/*`, and `octokit/*` organizations by default (configurable via `include-first-party`)
 4. **Checks Immutability**: For each third-party action:
    - **Full 40-character SHA references** (e.g., `user/action@abc123...def`) are considered inherently immutable (no API check needed)
    - For tag/branch references, attempts to fetch the release via GitHub API
@@ -144,7 +153,7 @@ jobs:
 
 - ✅ **Full 40-character SHA**: `user/action@1234567890abcdef1234567890abcdef12345678` - Cryptographic hash that cannot change
 - ✅ **Immutable release tags**: Release tags that have been marked as immutable via GitHub API
-- ✅ **Actions from trusted organizations**: `actions/*`, `github/*`, and `octokit/*` organizations [already publish immutable releases](https://github.com/github/codeql/blob/main/actions/ql/extensions/immutable-actions-list/ext/immutable_actions.yml) and are excluded from checks
+- ✅ **Actions from trusted organizations**: `actions/*`, `github/*`, and `octokit/*` organizations [already publish immutable releases](https://github.com/github/codeql/blob/main/actions/ql/extensions/immutable-actions-list/ext/immutable_actions.yml) and are excluded from checks by default (configurable via `include-first-party`)
 - ❌ **Mutable release tags**: Release tags that can still be modified or deleted
 - ❌ **Branch references**: `user/action@main` - Branches are always mutable
 - ❌ **Major version tags**: `user/action@v1` - Typically don't have releases, can be moved

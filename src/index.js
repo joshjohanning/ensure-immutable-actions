@@ -246,17 +246,19 @@ export async function checkReleaseImmutability(octokit, owner, repo, ref) {
  * Check all actions from workflows
  * @param {Octokit} octokit - Octokit instance
  * @param {Array} actions - Array of action references
+ * @param {boolean} includeFirstParty - Whether to include first-party actions in checks
  * @returns {Promise<Object>} { mutable: Array, immutable: Array, firstParty: Array, byWorkflow: Object }
  */
-export async function checkAllActions(octokit, actions) {
+export async function checkAllActions(octokit, actions, includeFirstParty = false) {
   const mutable = [];
   const immutable = [];
   const firstParty = [];
   const byWorkflow = {};
 
   // Separate first-party actions from third-party actions
-  const thirdPartyActions = actions.filter(a => !a.isFirstParty);
-  const firstPartyActions = actions.filter(a => a.isFirstParty);
+  // When includeFirstParty is true, treat all actions as third-party for immutability checks
+  const thirdPartyActions = includeFirstParty ? actions : actions.filter(a => !a.isFirstParty);
+  const firstPartyActions = includeFirstParty ? [] : actions.filter(a => a.isFirstParty);
 
   // Create a cache for immutability results
   const immutabilityCache = new Map();
@@ -339,7 +341,7 @@ export async function checkAllActions(octokit, actions) {
         ...cachedResult
       };
 
-      if (action.isFirstParty) {
+      if (!includeFirstParty && action.isFirstParty) {
         byWorkflow[workflowFile].firstParty.push(actionInfo);
       } else if (cachedResult.immutable) {
         byWorkflow[workflowFile].immutable.push(actionInfo);
@@ -360,6 +362,7 @@ export async function run() {
     // Get inputs
     const githubToken = core.getInput('github-token');
     const failOnMutable = core.getBooleanInput('fail-on-mutable');
+    const includeFirstParty = core.getBooleanInput('include-first-party');
     const workflowsInput = core.getInput('workflows');
     const excludeWorkflowsInput = core.getInput('exclude-workflows');
 
@@ -370,6 +373,7 @@ export async function run() {
 
     core.info('Starting Ensure Immutable Actions...');
     core.info(`Fail on mutable: ${failOnMutable}`);
+    core.info(`Include first-party: ${includeFirstParty}`);
 
     // Get workspace directory
     const workspaceDir = process.env.GITHUB_WORKSPACE || process.cwd();
@@ -428,7 +432,11 @@ export async function run() {
     const octokit = new Octokit({ auth: githubToken });
 
     // Check all actions
-    const { mutable, immutable, firstParty, byWorkflow } = await checkAllActions(octokit, allActions);
+    const { mutable, immutable, firstParty, byWorkflow } = await checkAllActions(
+      octokit,
+      allActions,
+      includeFirstParty
+    );
 
     // Set outputs
     core.setOutput('workflows-checked', JSON.stringify(workflowBasenames));
@@ -522,9 +530,9 @@ export async function run() {
     }
 
     if (mutable.length > 0) {
-      core.warning(`\n❌ ${mutable.length} action(s) using mutable releases:`);
+      core.info(`\n❌ ${mutable.length} action(s) using mutable releases:`);
       for (const action of mutable) {
-        core.warning(`   - ${action.owner}/${action.repo}@${action.ref} (${action.message})`);
+        core.notice(`${action.owner}/${action.repo}@${action.ref} (${action.message})`);
       }
     }
 

@@ -14,6 +14,7 @@ const mockCore = {
   setFailed: jest.fn(),
   info: jest.fn(),
   warning: jest.fn(),
+  notice: jest.fn(),
   setSecret: jest.fn(),
   summary: {
     addHeading: jest.fn().mockReturnThis(),
@@ -59,7 +60,11 @@ describe('Ensure Immutable Actions', () => {
     mockOctokit.rest.repos.getReleaseByTag.mockClear();
 
     // Set default inputs
-    mockCore.getBooleanInput.mockReturnValue(true);
+    mockCore.getBooleanInput.mockImplementation(name => {
+      if (name === 'fail-on-mutable') return true;
+      if (name === 'include-first-party') return false;
+      return true;
+    });
     mockCore.getInput.mockImplementation(name => {
       const inputs = {
         'github-token': 'test-token',
@@ -653,6 +658,70 @@ jobs:
       expect(result.byWorkflow['ci.yml'].firstParty[0].uses).toBe('actions/checkout@v4');
       expect(result.byWorkflow['ci.yml'].firstParty[1].uses).toBe('actions/setup-node@v4');
     });
+
+    test('should check first-party actions via API when includeFirstParty is true', async () => {
+      const actions = [
+        {
+          uses: 'actions/checkout@v4',
+          owner: 'actions',
+          repo: 'checkout',
+          ref: 'v4',
+          workflowFile: 'workflow1.yml',
+          isFirstParty: true
+        },
+        {
+          uses: 'owner/repo@v1',
+          owner: 'owner',
+          repo: 'repo',
+          ref: 'v1',
+          workflowFile: 'workflow1.yml',
+          isFirstParty: false
+        }
+      ];
+
+      mockOctokit.rest.repos.getReleaseByTag.mockResolvedValue({
+        data: { immutable: true }
+      });
+
+      const result = await checkAllActions(mockOctokit, actions, true);
+
+      // Should call API for both actions
+      expect(mockOctokit.rest.repos.getReleaseByTag).toHaveBeenCalledTimes(2);
+
+      // No actions in firstParty array
+      expect(result.firstParty).toHaveLength(0);
+
+      // Both should be in immutable array
+      expect(result.immutable).toHaveLength(2);
+
+      // byWorkflow should have no firstParty, both in immutable
+      expect(result.byWorkflow['workflow1.yml'].firstParty).toHaveLength(0);
+      expect(result.byWorkflow['workflow1.yml'].immutable).toHaveLength(2);
+    });
+
+    test('should report first-party actions as mutable when includeFirstParty is true and release is mutable', async () => {
+      const actions = [
+        {
+          uses: 'actions/checkout@v4',
+          owner: 'actions',
+          repo: 'checkout',
+          ref: 'v4',
+          workflowFile: 'ci.yml',
+          isFirstParty: true
+        }
+      ];
+
+      mockOctokit.rest.repos.getReleaseByTag.mockResolvedValue({
+        data: { immutable: false }
+      });
+
+      const result = await checkAllActions(mockOctokit, actions, true);
+
+      expect(result.firstParty).toHaveLength(0);
+      expect(result.mutable).toHaveLength(1);
+      expect(result.mutable[0].owner).toBe('actions');
+      expect(result.byWorkflow['ci.yml'].mutable).toHaveLength(1);
+    });
   });
 
   describe('Action execution', () => {
@@ -703,7 +772,11 @@ jobs:
     });
 
     test('should fail with mutable actions when fail-on-mutable is true', async () => {
-      mockCore.getBooleanInput.mockReturnValue(true);
+      mockCore.getBooleanInput.mockImplementation(name => {
+        if (name === 'fail-on-mutable') return true;
+        if (name === 'include-first-party') return false;
+        return true;
+      });
       mockCore.getInput.mockImplementation(name => {
         const inputs = {
           'github-token': 'test-token'
@@ -722,7 +795,11 @@ jobs:
     });
 
     test('should not fail with mutable actions when fail-on-mutable is false', async () => {
-      mockCore.getBooleanInput.mockReturnValue(false);
+      mockCore.getBooleanInput.mockImplementation(name => {
+        if (name === 'fail-on-mutable') return false;
+        if (name === 'include-first-party') return false;
+        return true;
+      });
       mockCore.getInput.mockImplementation(name => {
         const inputs = {
           'github-token': 'test-token'
