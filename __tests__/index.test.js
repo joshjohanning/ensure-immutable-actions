@@ -555,11 +555,13 @@ jobs:
       // Should only call API once (for third-party action)
       expect(mockOctokit.rest.repos.getReleaseByTag).toHaveBeenCalledTimes(1);
 
-      // First-party actions should be in firstParty array
+      // First-party actions should be in firstParty array with allowed/reason
       expect(result.firstParty).toHaveLength(1);
       expect(result.firstParty[0].owner).toBe('actions');
       expect(result.firstParty[0].message).toBe('First-party action');
       expect(result.firstParty[0].isFirstParty).toBe(true);
+      expect(result.firstParty[0].allowed).toBe(true);
+      expect(result.firstParty[0].reason).toBe('Excluded (first-party)');
 
       // Third-party action should be in immutable array
       expect(result.immutable).toHaveLength(1);
@@ -688,8 +690,11 @@ jobs:
       // Should call API for both actions
       expect(mockOctokit.rest.repos.getReleaseByTag).toHaveBeenCalledTimes(2);
 
-      // No actions in firstParty array
-      expect(result.firstParty).toHaveLength(0);
+      // firstParty array should contain the checked first-party action with allowed/reason
+      expect(result.firstParty).toHaveLength(1);
+      expect(result.firstParty[0].owner).toBe('actions');
+      expect(result.firstParty[0].allowed).toBe(true);
+      expect(result.firstParty[0].reason).toBe('Immutable release');
 
       // Both should be in immutable array
       expect(result.immutable).toHaveLength(2);
@@ -723,7 +728,10 @@ jobs:
 
       const result = await checkAllActions(mockOctokit, actions, true);
 
-      expect(result.firstParty).toHaveLength(0);
+      // firstParty should have the action with allowed: false
+      expect(result.firstParty).toHaveLength(1);
+      expect(result.firstParty[0].allowed).toBe(false);
+      expect(result.firstParty[0].reason).toBe('Mutable release');
       expect(result.mutable).toHaveLength(1);
       expect(result.mutable[0].owner).toBe('actions');
       expect(result.byWorkflow['ci.yml'].mutable).toHaveLength(1);
@@ -896,8 +904,12 @@ jobs:
       expect(mockCore.setOutput).toHaveBeenCalledWith('all-passed', false);
       expect(mockCore.setFailed).toHaveBeenCalled();
 
-      // first-party-actions output should be empty
-      expect(mockCore.setOutput).toHaveBeenCalledWith('first-party-actions', '[]');
+      // first-party-actions should contain the action with allowed/reason
+      const firstPartyCall = mockCore.setOutput.mock.calls.find(c => c[0] === 'first-party-actions');
+      const firstPartyOutput = JSON.parse(firstPartyCall[1]);
+      expect(firstPartyOutput).toHaveLength(1);
+      expect(firstPartyOutput[0].allowed).toBe(false);
+      expect(firstPartyOutput[0].reason).toBe('Mutable release');
     });
   });
 });

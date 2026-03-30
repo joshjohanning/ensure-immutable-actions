@@ -258,14 +258,15 @@ export async function checkAllActions(octokit, actions, includeFirstParty = fals
   // Separate first-party actions from third-party actions
   // When includeFirstParty is true, treat all actions as third-party for immutability checks
   const thirdPartyActions = includeFirstParty ? actions : actions.filter(a => !a.isFirstParty);
-  const firstPartyActions = includeFirstParty ? [] : actions.filter(a => a.isFirstParty);
+  const excludedFirstPartyActions = includeFirstParty ? [] : actions.filter(a => a.isFirstParty);
+  const allFirstPartyActions = actions.filter(a => a.isFirstParty);
 
   // Create a cache for immutability results
   const immutabilityCache = new Map();
 
-  // Process first-party actions (no API check needed) - deduplicate by uses string
-  const uniqueFirstPartyActions = Array.from(new Map(firstPartyActions.map(a => [a.uses, a])).values());
-  for (const action of uniqueFirstPartyActions) {
+  // Process excluded first-party actions (no API check needed) - deduplicate by uses string
+  const uniqueExcludedFirstParty = Array.from(new Map(excludedFirstPartyActions.map(a => [a.uses, a])).values());
+  for (const action of uniqueExcludedFirstParty) {
     const actionInfo = {
       uses: action.uses,
       owner: action.owner,
@@ -274,7 +275,9 @@ export async function checkAllActions(octokit, actions, includeFirstParty = fals
       isFirstParty: true,
       immutable: true,
       releaseFound: false,
-      message: 'First-party action'
+      message: 'First-party action',
+      allowed: true,
+      reason: 'Excluded (first-party)'
     };
     firstParty.push(actionInfo);
 
@@ -308,6 +311,24 @@ export async function checkAllActions(octokit, actions, includeFirstParty = fals
       immutable.push(actionInfo);
     } else {
       mutable.push(actionInfo);
+    }
+  }
+
+  // Add checked first-party actions to the firstParty output with allowed/reason
+  if (includeFirstParty) {
+    const uniqueCheckedFirstParty = Array.from(new Map(allFirstPartyActions.map(a => [a.uses, a])).values());
+    for (const action of uniqueCheckedFirstParty) {
+      const cachedResult = immutabilityCache.get(action.uses);
+      firstParty.push({
+        uses: action.uses,
+        owner: action.owner,
+        repo: action.repo,
+        ref: action.ref,
+        isFirstParty: true,
+        ...cachedResult,
+        allowed: cachedResult.immutable,
+        reason: cachedResult.message
+      });
     }
   }
 

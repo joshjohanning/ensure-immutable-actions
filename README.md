@@ -94,13 +94,13 @@ jobs:
 
 ## Outputs
 
-| Output                | Description                                                                                         |
-| --------------------- | --------------------------------------------------------------------------------------------------- |
-| `mutable-actions`     | JSON array of actions using mutable releases                                                        |
-| `immutable-actions`   | JSON array of actions using immutable releases                                                      |
-| `first-party-actions` | JSON array of first-party actions excluded from checks. Empty when `include-first-party` is `true`. |
-| `all-passed`          | Boolean indicating if all checks passed                                                             |
-| `workflows-checked`   | List of workflow files that were checked                                                            |
+| Output                | Description                                                                                       |
+| --------------------- | ------------------------------------------------------------------------------------------------- |
+| `mutable-actions`     | JSON array of actions using mutable releases                                                      |
+| `immutable-actions`   | JSON array of actions using immutable releases                                                    |
+| `first-party-actions` | JSON array of all first-party actions with `allowed` and `reason` fields indicating their status. |
+| `all-passed`          | Boolean indicating if all checks passed                                                           |
+| `workflows-checked`   | List of workflow files that were checked                                                          |
 
 ## Examples
 
