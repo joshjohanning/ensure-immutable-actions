@@ -300,7 +300,7 @@ export async function checkAllActions(octokit, actions, includeFirstParty = fals
       owner: action.owner,
       repo: action.repo,
       ref: action.ref,
-      isFirstParty: false,
+      isFirstParty: action.isFirstParty || false,
       ...result
     };
 

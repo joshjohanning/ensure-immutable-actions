@@ -694,6 +694,12 @@ jobs:
       // Both should be in immutable array
       expect(result.immutable).toHaveLength(2);
 
+      // First-party action should preserve isFirstParty flag
+      const checkoutAction = result.immutable.find(a => a.owner === 'actions');
+      expect(checkoutAction.isFirstParty).toBe(true);
+      const thirdPartyAction = result.immutable.find(a => a.owner === 'owner');
+      expect(thirdPartyAction.isFirstParty).toBe(false);
+
       // byWorkflow should have no firstParty, both in immutable
       expect(result.byWorkflow['workflow1.yml'].firstParty).toHaveLength(0);
       expect(result.byWorkflow['workflow1.yml'].immutable).toHaveLength(2);
