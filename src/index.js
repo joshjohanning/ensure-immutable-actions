@@ -275,9 +275,8 @@ export async function checkAllActions(octokit, actions, includeFirstParty = fals
       isFirstParty: true,
       immutable: true,
       releaseFound: false,
-      message: 'First-party action',
-      allowed: true,
-      reason: 'Excluded (first-party)'
+      message: 'Excluded (first-party)',
+      allowed: true
     };
     firstParty.push(actionInfo);
 
@@ -285,7 +284,7 @@ export async function checkAllActions(octokit, actions, includeFirstParty = fals
     immutabilityCache.set(action.uses, {
       immutable: true,
       releaseFound: false,
-      message: 'First-party action'
+      message: 'Excluded (first-party)'
     });
   }
 
@@ -326,8 +325,7 @@ export async function checkAllActions(octokit, actions, includeFirstParty = fals
         ref: action.ref,
         isFirstParty: true,
         ...cachedResult,
-        allowed: cachedResult.immutable,
-        reason: cachedResult.message
+        allowed: cachedResult.immutable
       });
     }
   }

@@ -98,7 +98,7 @@ jobs:
 | --------------------- | ------------------------------------------------------------------------------------------------- |
 | `mutable-actions`     | JSON array of actions using mutable releases                                                      |
 | `immutable-actions`   | JSON array of actions using immutable releases                                                    |
-| `first-party-actions` | JSON array of all first-party actions with `allowed` and `reason` fields indicating their status. |
+| `first-party-actions` | JSON array of all first-party actions with `allowed` and `message` fields indicating their status. |
 | `all-passed`          | Boolean indicating if all checks passed                                                           |
 | `workflows-checked`   | List of workflow files that were checked                                                          |
 

@@ -31,7 +31,7 @@ outputs:
   immutable-actions:
     description: 'JSON array of actions using immutable releases'
   first-party-actions:
-    description: 'JSON array of all first-party actions with allowed and reason fields indicating their status'
+    description: 'JSON array of all first-party actions with allowed and message fields indicating their status'
   all-passed:
     description: 'Boolean indicating if all checks passed'
   workflows-checked:

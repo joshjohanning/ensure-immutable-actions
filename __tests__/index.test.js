@@ -558,10 +558,10 @@ jobs:
       // First-party actions should be in firstParty array with allowed/reason
       expect(result.firstParty).toHaveLength(1);
       expect(result.firstParty[0].owner).toBe('actions');
-      expect(result.firstParty[0].message).toBe('First-party action');
+      expect(result.firstParty[0].message).toBe('Excluded (first-party)');
       expect(result.firstParty[0].isFirstParty).toBe(true);
       expect(result.firstParty[0].allowed).toBe(true);
-      expect(result.firstParty[0].reason).toBe('Excluded (first-party)');
+      expect(result.firstParty[0].message).toBe('Excluded (first-party)');
 
       // Third-party action should be in immutable array
       expect(result.immutable).toHaveLength(1);
@@ -694,7 +694,7 @@ jobs:
       expect(result.firstParty).toHaveLength(1);
       expect(result.firstParty[0].owner).toBe('actions');
       expect(result.firstParty[0].allowed).toBe(true);
-      expect(result.firstParty[0].reason).toBe('Immutable release');
+      expect(result.firstParty[0].message).toBe('Immutable release');
 
       // Both should be in immutable array
       expect(result.immutable).toHaveLength(2);
@@ -731,7 +731,7 @@ jobs:
       // firstParty should have the action with allowed: false
       expect(result.firstParty).toHaveLength(1);
       expect(result.firstParty[0].allowed).toBe(false);
-      expect(result.firstParty[0].reason).toBe('Mutable release');
+      expect(result.firstParty[0].message).toBe('Mutable release');
       expect(result.mutable).toHaveLength(1);
       expect(result.mutable[0].owner).toBe('actions');
       expect(result.byWorkflow['ci.yml'].mutable).toHaveLength(1);
@@ -909,7 +909,7 @@ jobs:
       const firstPartyOutput = JSON.parse(firstPartyCall[1]);
       expect(firstPartyOutput).toHaveLength(1);
       expect(firstPartyOutput[0].allowed).toBe(false);
-      expect(firstPartyOutput[0].reason).toBe('Mutable release');
+      expect(firstPartyOutput[0].message).toBe('Mutable release');
     });
   });
 });
