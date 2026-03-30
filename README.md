@@ -187,14 +187,11 @@ npm install
 
 ### Testing Locally
 
-You can test the action locally by setting environment variables:
+You can test the action locally using `env` to set input variables (hyphens are preserved in the env var names):
 
 ```bash
-export INPUT_GITHUB_TOKEN="ghp_your_token_here"
-export INPUT_FAIL_ON_MUTABLE="true"
-export INPUT_WORKFLOWS="ci.yml"
 export GITHUB_WORKSPACE="/path/to/your/repo"
-node src/index.js
+env 'INPUT_GITHUB-TOKEN=ghp_your_token_here' 'INPUT_FAIL-ON-MUTABLE=true' 'INPUT_WORKFLOWS=ci.yml' node src/index.js
 ```
 
 ## License

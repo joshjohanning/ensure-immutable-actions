@@ -5,7 +5,7 @@
  * Local Development & Testing:
  *
  * Uses core.getInput() which reads INPUT_<NAME> env vars (hyphens preserved).
- * Since shell variables can't contain hyphens, use env(1) or inline assignment:
+ * Since shell variables can't contain hyphens, set these via env(1):
  *
  *    env 'INPUT_GITHUB-TOKEN=ghp_xxx' 'INPUT_FAIL-ON-MUTABLE=true' node src/index.js
  *
