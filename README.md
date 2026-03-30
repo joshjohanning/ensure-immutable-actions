@@ -84,23 +84,23 @@ jobs:
 
 ## Inputs
 
-| Input                 | Description                                                                                                                                        | Required | Default               |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | --------------------- |
-| `github-token`        | GitHub token for API calls                                                                                                                         | Yes      | `${{ github.token }}` |
-| `fail-on-mutable`     | Fail the workflow if mutable actions are found                                                                                                     | No       | `true`                |
-| `workflows`           | Specific workflow files to check (comma-separated, e.g., `ci.yml,deploy.yml`). **If not specified, checks ALL workflows in `.github/workflows/`.** | No       | All workflows         |
-| `exclude-workflows`   | Workflow files to exclude from checks (comma-separated). Only applies when `workflows` is not specified.                                           | No       | -                     |
-| `include-first-party` | Include first-party actions (`actions/*`, `github/*`, `octokit/*`) in immutability checks. By default, first-party actions are excluded.           | No       | `false`               |
+| Input                 | Description                                                                                                                                                                                                           | Required | Default               |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | --------------------- |
+| `github-token`        | GitHub token for API calls                                                                                                                                                                                            | Yes      | `${{ github.token }}` |
+| `fail-on-mutable`     | Fail the workflow if mutable actions are found                                                                                                                                                                        | No       | `true`                |
+| `workflows`           | Specific workflow files to check (comma-separated, e.g., `ci.yml,deploy.yml`). **If not specified, checks ALL workflows in `.github/workflows/`.**                                                                    | No       | All workflows         |
+| `exclude-workflows`   | Workflow files to exclude from checks (comma-separated). Only applies when `workflows` is not specified.                                                                                                              | No       | -                     |
+| `include-first-party` | Include first-party actions (`actions/*`, `github/*`, `octokit/*`) in immutability checks. When `true`, first-party actions appear in `mutable-actions`/`immutable-actions` outputs instead of `first-party-actions`. | No       | `false`               |
 
 ## Outputs
 
-| Output                | Description                                                           |
-| --------------------- | --------------------------------------------------------------------- |
-| `mutable-actions`     | JSON array of actions using mutable releases                          |
-| `immutable-actions`   | JSON array of actions using immutable releases                        |
-| `first-party-actions` | JSON array of first-party actions (actions/\*, github/\*, octokit/\*) |
-| `all-passed`          | Boolean indicating if all checks passed                               |
-| `workflows-checked`   | List of workflow files that were checked                              |
+| Output                | Description                                                                                         |
+| --------------------- | --------------------------------------------------------------------------------------------------- |
+| `mutable-actions`     | JSON array of actions using mutable releases                                                        |
+| `immutable-actions`   | JSON array of actions using immutable releases                                                      |
+| `first-party-actions` | JSON array of first-party actions excluded from checks. Empty when `include-first-party` is `true`. |
+| `all-passed`          | Boolean indicating if all checks passed                                                             |
+| `workflows-checked`   | List of workflow files that were checked                                                            |
 
 ## Examples
 
@@ -139,9 +139,9 @@ jobs:
 ## How it Works
 
 1. **Scans Workflows**: Reads all workflow files (or specified ones) from `.github/workflows/`
-2. **Extracts Actions**: Parses YAML to find all `uses:` references to third-party actions
+2. **Extracts Actions**: Parses YAML to find all `uses:` references
 3. **Filters**: Excludes `actions/*`, `github/*`, and `octokit/*` organizations by default (configurable via `include-first-party`)
-4. **Checks Immutability**: For each third-party action:
+4. **Checks Immutability**: For each action not excluded by filters:
    - **Full 40-character SHA references** (e.g., `user/action@abc123...def`) are considered inherently immutable (no API check needed)
    - For tag/branch references, attempts to fetch the release via GitHub API
    - Checks the `immutable` property of the release
