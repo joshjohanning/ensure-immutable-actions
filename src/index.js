@@ -9,8 +9,7 @@
  *
  *    env 'INPUT_GITHUB-TOKEN=ghp_xxx' 'INPUT_FAIL-ON-MUTABLE=true' node src/index.js
  *
- * Set GitHub context environment variables:
- *    export GITHUB_REPOSITORY="owner/repo-name"
+ * Set workspace directory environment variable (optional, defaults to process.cwd()):
  *    export GITHUB_WORKSPACE="/path/to/repo"
  */
 
