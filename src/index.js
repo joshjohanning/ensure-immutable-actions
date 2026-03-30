@@ -488,24 +488,18 @@ export async function run() {
         let markdownTable = '| Action | Status | Message |\n';
         markdownTable += '|--------|--------|----------|\n';
 
-        // Use concatenation order: first-party, then immutable, then mutable
-        const sortedActions = [...workflowData.firstParty, ...workflowData.immutable, ...workflowData.mutable];
-
-        for (const action of sortedActions) {
-          let status;
-          let message;
-          if (action.isFirstParty) {
-            status = '✅ First-party';
-            message = action.message;
-          } else if (action.immutable) {
-            status = '✅ Immutable';
-            message = action.message;
-          } else {
-            status = '❌ Mutable';
-            message = action.message;
-          }
+        // Iterate each category separately so status reflects check results, not just isFirstParty flag
+        for (const action of workflowData.firstParty) {
           const actionRef = formatActionReference(action.owner, action.repo, action.ref);
-          markdownTable += `| ${actionRef} | ${status} | ${message} |\n`;
+          markdownTable += `| ${actionRef} | ✅ First-party | ${action.message} |\n`;
+        }
+        for (const action of workflowData.immutable) {
+          const actionRef = formatActionReference(action.owner, action.repo, action.ref);
+          markdownTable += `| ${actionRef} | ✅ Immutable | ${action.message} |\n`;
+        }
+        for (const action of workflowData.mutable) {
+          const actionRef = formatActionReference(action.owner, action.repo, action.ref);
+          markdownTable += `| ${actionRef} | ❌ Mutable | ${action.message} |\n`;
         }
 
         summary = summary.addRaw(markdownTable).addRaw('\n');
