@@ -150,7 +150,7 @@ jobs:
 6. **Optionally Fails**: If `fail-on-mutable` is true, fails the workflow when mutable actions are found
 
 > [!NOTE]
-> This action always checks immutability against the github.com API, since that is where marketplace actions are published. It is not designed for use with GHES API URLs.
+> This action always checks immutability against the github.com API since that is the provenance for marketplace actions. It is not designed for use with GHES API URLs.
 
 ## What's Considered Immutable?
 
