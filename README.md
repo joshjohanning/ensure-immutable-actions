@@ -25,11 +25,11 @@ The action generates a report organized by workflow, making it easy to identify 
 
 **Actions:** 2 first-party, 1 immutable, 0 mutable
 
-| Action                                                         | Status         | Message            |
-| -------------------------------------------------------------- | -------------- | ------------------ |
-| actions/checkout@v4                                            | ✅ First-party | First-party action |
-| actions/setup-node@v4                                          | ✅ First-party | First-party action |
-| [owner/repo@v1.2.3](https://github.com/owner/repo/tree/v1.2.3) | ✅ Immutable   | Immutable release  |
+| Action                                                         | Status         | Message                |
+| -------------------------------------------------------------- | -------------- | ---------------------- |
+| actions/checkout@v4                                            | ✅ First-party | Excluded (first-party) |
+| actions/setup-node@v4                                          | ✅ First-party | Excluded (first-party) |
+| [owner/repo@v1.2.3](https://github.com/owner/repo/tree/v1.2.3) | ✅ Immutable   | Immutable release      |
 
 ### ❌ deploy.yml
 
@@ -84,23 +84,23 @@ jobs:
 
 ## Inputs
 
-| Input                 | Description                                                                                                                                                                                                           | Required | Default               |
-| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | --------------------- |
-| `github-token`        | GitHub token for API calls                                                                                                                                                                                            | Yes      | `${{ github.token }}` |
-| `fail-on-mutable`     | Fail the workflow if mutable actions are found                                                                                                                                                                        | No       | `true`                |
-| `workflows`           | Specific workflow files to check (comma-separated, e.g., `ci.yml,deploy.yml`). **If not specified, checks ALL workflows in `.github/workflows/`.**                                                                    | No       | All workflows         |
-| `exclude-workflows`   | Workflow files to exclude from checks (comma-separated). Only applies when `workflows` is not specified.                                                                                                              | No       | -                     |
-| `include-first-party` | Include first-party actions (`actions/*`, `github/*`, `octokit/*`) in immutability checks. When `true`, first-party actions appear in `mutable-actions`/`immutable-actions` outputs instead of `first-party-actions`. | No       | `false`               |
+| Input                 | Description                                                                                                                                                                                                                                    | Required | Default               |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | --------------------- |
+| `github-token`        | GitHub token for API calls                                                                                                                                                                                                                     | Yes      | `${{ github.token }}` |
+| `fail-on-mutable`     | Fail the workflow if mutable actions are found                                                                                                                                                                                                 | No       | `true`                |
+| `workflows`           | Specific workflow files to check (comma-separated, e.g., `ci.yml,deploy.yml`). **If not specified, checks ALL workflows in `.github/workflows/`.**                                                                                             | No       | All workflows         |
+| `exclude-workflows`   | Workflow files to exclude from checks (comma-separated). Only applies when `workflows` is not specified.                                                                                                                                       | No       | -                     |
+| `include-first-party` | Include first-party actions (`actions/*`, `github/*`, `octokit/*`) in immutability checks. When `true`, first-party actions are also checked and appear in `mutable-actions`/`immutable-actions` outputs in addition to `first-party-actions`. | No       | `false`               |
 
 ## Outputs
 
-| Output                | Description                                                                                       |
-| --------------------- | ------------------------------------------------------------------------------------------------- |
-| `mutable-actions`     | JSON array of actions using mutable releases                                                      |
-| `immutable-actions`   | JSON array of actions using immutable releases                                                    |
+| Output                | Description                                                                                        |
+| --------------------- | -------------------------------------------------------------------------------------------------- |
+| `mutable-actions`     | JSON array of actions using mutable releases                                                       |
+| `immutable-actions`   | JSON array of actions using immutable releases                                                     |
 | `first-party-actions` | JSON array of all first-party actions with `allowed` and `message` fields indicating their status. |
-| `all-passed`          | Boolean indicating if all checks passed                                                           |
-| `workflows-checked`   | List of workflow files that were checked                                                          |
+| `all-passed`          | Boolean indicating if all checks passed                                                            |
+| `workflows-checked`   | List of workflow files that were checked                                                           |
 
 ## Examples
 

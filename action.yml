@@ -21,7 +21,7 @@ inputs:
     description: 'Workflow files to exclude from checks (comma-separated). Only applies when workflows are not specified'
     required: false
   include-first-party:
-    description: 'Include first-party actions (actions/*, github/*, octokit/*) in immutability checks. When true, first-party actions appear in mutable-actions/immutable-actions outputs instead of first-party-actions.'
+    description: 'Include first-party actions (actions/*, github/*, octokit/*) in immutability checks. When true, first-party actions are also checked and appear in mutable-actions/immutable-actions outputs in addition to first-party-actions.'
     required: false
     default: 'false'
 
