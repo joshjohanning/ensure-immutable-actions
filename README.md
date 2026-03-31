@@ -23,7 +23,7 @@ The action generates a report organized by workflow, making it easy to identify 
 
 ### ✅ ci.yml
 
-**Actions:** 2 first-party, 1 immutable, 0 mutable
+**Actions:** 2 excluded, 1 immutable, 0 mutable
 
 | Action                                                         | Status         | Message                |
 | -------------------------------------------------------------- | -------------- | ---------------------- |
@@ -33,7 +33,7 @@ The action generates a report organized by workflow, making it easy to identify 
 
 ### ❌ deploy.yml
 
-**Actions:** 0 first-party, 1 immutable, 2 mutable
+**Actions:** 0 excluded, 1 immutable, 2 mutable
 
 | Action                                                                             | Status       | Message                             |
 | ---------------------------------------------------------------------------------- | ------------ | ----------------------------------- |

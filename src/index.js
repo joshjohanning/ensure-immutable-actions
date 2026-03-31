@@ -474,11 +474,11 @@ export async function run() {
         summary = summary.addRaw('# ❌ Immutable Actions Check - Failed\n\n');
       }
 
+      const excludedCount = firstParty.filter(a => a.allowed && a.message === 'Excluded (first-party)').length;
+
       summary = summary
         .addRaw(`**Workflows Checked:** ${workflowBasenames.join(', ')}\n\n`)
-        .addRaw(
-          `**Summary:** ${firstParty.length} first-party, ${immutable.length} immutable, ${mutable.length} mutable\n\n`
-        );
+        .addRaw(`**Summary:** ${excludedCount} excluded, ${immutable.length} immutable, ${mutable.length} mutable\n\n`);
 
       // Add a table for each workflow
       for (const workflowFile of workflowBasenames) {
@@ -500,7 +500,7 @@ export async function run() {
 
         summary = summary.addRaw(`### ${workflowStatus} ${workflowFile}\n\n`);
         summary = summary.addRaw(
-          `**Actions:** ${workflowFirstPartyCount} first-party, ${workflowImmutableCount} immutable, ${workflowMutableCount} mutable\n\n`
+          `**Actions:** ${workflowFirstPartyCount} excluded, ${workflowImmutableCount} immutable, ${workflowMutableCount} mutable\n\n`
         );
 
         // Build markdown table
