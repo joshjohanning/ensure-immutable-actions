@@ -558,7 +558,7 @@ export async function run() {
           `Please use immutable releases for supply chain security.`
       );
     } else if (mutable.length === 0) {
-      core.info('\n✅ All third-party actions are using immutable releases!');
+      core.info('\n✅ All actions are using immutable releases!');
     }
   } catch (error) {
     core.setFailed(`Action failed with error: ${error.message}`);
