@@ -561,7 +561,6 @@ jobs:
       expect(result.firstParty[0].message).toBe('Excluded (first-party)');
       expect(result.firstParty[0].isFirstParty).toBe(true);
       expect(result.firstParty[0].allowed).toBe(true);
-      expect(result.firstParty[0].message).toBe('Excluded (first-party)');
 
       // Third-party action should be in immutable array
       expect(result.immutable).toHaveLength(1);

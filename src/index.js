@@ -255,9 +255,9 @@ export async function checkAllActions(octokit, actions, includeFirstParty = fals
   const firstParty = [];
   const byWorkflow = {};
 
-  // Separate first-party actions from third-party actions
-  // When includeFirstParty is true, treat all actions as third-party for immutability checks
-  const thirdPartyActions = includeFirstParty ? actions : actions.filter(a => !a.isFirstParty);
+  // Separate first-party actions from actions to check
+  // When includeFirstParty is true, check all actions for immutability
+  const actionsToCheck = includeFirstParty ? actions : actions.filter(a => !a.isFirstParty);
   const excludedFirstPartyActions = includeFirstParty ? [] : actions.filter(a => a.isFirstParty);
   const allFirstPartyActions = actions.filter(a => a.isFirstParty);
 
@@ -276,7 +276,8 @@ export async function checkAllActions(octokit, actions, includeFirstParty = fals
       immutable: true,
       releaseFound: false,
       message: 'Excluded (first-party)',
-      allowed: true
+      allowed: true,
+      excluded: true
     };
     firstParty.push(actionInfo);
 
@@ -289,7 +290,7 @@ export async function checkAllActions(octokit, actions, includeFirstParty = fals
   }
 
   // Deduplicate third-party actions by uses string for API calls, but preserve workflow info
-  const uniqueActions = Array.from(new Map(thirdPartyActions.map(a => [a.uses, a])).values());
+  const uniqueActions = Array.from(new Map(actionsToCheck.map(a => [a.uses, a])).values());
 
   for (const action of uniqueActions) {
     core.info(`Checking ${action.owner}/${action.repo}@${action.ref}...`);
@@ -325,7 +326,8 @@ export async function checkAllActions(octokit, actions, includeFirstParty = fals
         ref: action.ref,
         isFirstParty: true,
         ...cachedResult,
-        allowed: cachedResult.immutable
+        allowed: cachedResult.immutable,
+        excluded: false
       });
     }
   }
@@ -474,7 +476,7 @@ export async function run() {
         summary = summary.addRaw('# ❌ Immutable Actions Check - Failed\n\n');
       }
 
-      const excludedCount = firstParty.filter(a => a.allowed && a.message === 'Excluded (first-party)').length;
+      const excludedCount = firstParty.filter(a => a.excluded).length;
 
       summary = summary
         .addRaw(`**Workflows Checked:** ${workflowBasenames.join(', ')}\n\n`)
