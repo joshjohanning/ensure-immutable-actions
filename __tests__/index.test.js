@@ -14,6 +14,7 @@ const mockCore = {
   setFailed: jest.fn(),
   info: jest.fn(),
   warning: jest.fn(),
+  notice: jest.fn(),
   setSecret: jest.fn(),
   summary: {
     addHeading: jest.fn().mockReturnThis(),
@@ -59,7 +60,11 @@ describe('Ensure Immutable Actions', () => {
     mockOctokit.rest.repos.getReleaseByTag.mockClear();
 
     // Set default inputs
-    mockCore.getBooleanInput.mockReturnValue(true);
+    mockCore.getBooleanInput.mockImplementation(name => {
+      if (name === 'fail-on-mutable') return true;
+      if (name === 'include-first-party') return false;
+      return true;
+    });
     mockCore.getInput.mockImplementation(name => {
       const inputs = {
         'github-token': 'test-token',
@@ -550,11 +555,12 @@ jobs:
       // Should only call API once (for third-party action)
       expect(mockOctokit.rest.repos.getReleaseByTag).toHaveBeenCalledTimes(1);
 
-      // First-party actions should be in firstParty array
+      // First-party actions should be in firstParty array with allowed/reason
       expect(result.firstParty).toHaveLength(1);
       expect(result.firstParty[0].owner).toBe('actions');
-      expect(result.firstParty[0].message).toBe('First-party action');
+      expect(result.firstParty[0].message).toBe('Excluded (first-party)');
       expect(result.firstParty[0].isFirstParty).toBe(true);
+      expect(result.firstParty[0].allowed).toBe(true);
 
       // Third-party action should be in immutable array
       expect(result.immutable).toHaveLength(1);
@@ -653,6 +659,82 @@ jobs:
       expect(result.byWorkflow['ci.yml'].firstParty[0].uses).toBe('actions/checkout@v4');
       expect(result.byWorkflow['ci.yml'].firstParty[1].uses).toBe('actions/setup-node@v4');
     });
+
+    test('should check first-party actions via API when includeFirstParty is true', async () => {
+      const actions = [
+        {
+          uses: 'actions/checkout@v4',
+          owner: 'actions',
+          repo: 'checkout',
+          ref: 'v4',
+          workflowFile: 'workflow1.yml',
+          isFirstParty: true
+        },
+        {
+          uses: 'owner/repo@v1',
+          owner: 'owner',
+          repo: 'repo',
+          ref: 'v1',
+          workflowFile: 'workflow1.yml',
+          isFirstParty: false
+        }
+      ];
+
+      mockOctokit.rest.repos.getReleaseByTag.mockResolvedValue({
+        data: { immutable: true }
+      });
+
+      const result = await checkAllActions(mockOctokit, actions, true);
+
+      // Should call API for both actions
+      expect(mockOctokit.rest.repos.getReleaseByTag).toHaveBeenCalledTimes(2);
+
+      // firstParty array should contain the checked first-party action with allowed/reason
+      expect(result.firstParty).toHaveLength(1);
+      expect(result.firstParty[0].owner).toBe('actions');
+      expect(result.firstParty[0].allowed).toBe(true);
+      expect(result.firstParty[0].message).toBe('Immutable release');
+
+      // Both should be in immutable array
+      expect(result.immutable).toHaveLength(2);
+
+      // First-party action should preserve isFirstParty flag
+      const checkoutAction = result.immutable.find(a => a.owner === 'actions');
+      expect(checkoutAction.isFirstParty).toBe(true);
+      const thirdPartyAction = result.immutable.find(a => a.owner === 'owner');
+      expect(thirdPartyAction.isFirstParty).toBe(false);
+
+      // byWorkflow should have no firstParty, both in immutable
+      expect(result.byWorkflow['workflow1.yml'].firstParty).toHaveLength(0);
+      expect(result.byWorkflow['workflow1.yml'].immutable).toHaveLength(2);
+    });
+
+    test('should report first-party actions as mutable when includeFirstParty is true and release is mutable', async () => {
+      const actions = [
+        {
+          uses: 'actions/checkout@v4',
+          owner: 'actions',
+          repo: 'checkout',
+          ref: 'v4',
+          workflowFile: 'ci.yml',
+          isFirstParty: true
+        }
+      ];
+
+      mockOctokit.rest.repos.getReleaseByTag.mockResolvedValue({
+        data: { immutable: false }
+      });
+
+      const result = await checkAllActions(mockOctokit, actions, true);
+
+      // firstParty should have the action with allowed: false
+      expect(result.firstParty).toHaveLength(1);
+      expect(result.firstParty[0].allowed).toBe(false);
+      expect(result.firstParty[0].message).toBe('Mutable release');
+      expect(result.mutable).toHaveLength(1);
+      expect(result.mutable[0].owner).toBe('actions');
+      expect(result.byWorkflow['ci.yml'].mutable).toHaveLength(1);
+    });
   });
 
   describe('Action execution', () => {
@@ -703,7 +785,11 @@ jobs:
     });
 
     test('should fail with mutable actions when fail-on-mutable is true', async () => {
-      mockCore.getBooleanInput.mockReturnValue(true);
+      mockCore.getBooleanInput.mockImplementation(name => {
+        if (name === 'fail-on-mutable') return true;
+        if (name === 'include-first-party') return false;
+        return true;
+      });
       mockCore.getInput.mockImplementation(name => {
         const inputs = {
           'github-token': 'test-token'
@@ -722,7 +808,11 @@ jobs:
     });
 
     test('should not fail with mutable actions when fail-on-mutable is false', async () => {
-      mockCore.getBooleanInput.mockReturnValue(false);
+      mockCore.getBooleanInput.mockImplementation(name => {
+        if (name === 'fail-on-mutable') return false;
+        if (name === 'include-first-party') return false;
+        return true;
+      });
       mockCore.getInput.mockImplementation(name => {
         const inputs = {
           'github-token': 'test-token'
@@ -779,6 +869,46 @@ jobs:
       // Should now process first-party actions
       expect(mockCore.info).not.toHaveBeenCalledWith(expect.stringContaining('No third-party actions found'));
       expect(mockCore.setOutput).toHaveBeenCalledWith('all-passed', true);
+    });
+
+    test('should check first-party actions when include-first-party is true', async () => {
+      mockCore.getBooleanInput.mockImplementation(name => {
+        if (name === 'fail-on-mutable') return true;
+        if (name === 'include-first-party') return true;
+        return true;
+      });
+
+      // Create workflow with only first-party actions
+      const workflowContent = `
+name: CI
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+`;
+      fs.writeFileSync(path.join(testWorkflowsDir, 'ci.yml'), workflowContent);
+
+      mockOctokit.rest.repos.getReleaseByTag.mockResolvedValue({
+        data: { immutable: false }
+      });
+
+      await run();
+
+      // First-party action should be API-checked
+      expect(mockOctokit.rest.repos.getReleaseByTag).toHaveBeenCalledTimes(1);
+
+      // Should fail since the first-party action has a mutable release
+      expect(mockCore.setOutput).toHaveBeenCalledWith('all-passed', false);
+      expect(mockCore.setFailed).toHaveBeenCalled();
+
+      // first-party-actions should contain the action with allowed/reason
+      const firstPartyCall = mockCore.setOutput.mock.calls.find(c => c[0] === 'first-party-actions');
+      const firstPartyOutput = JSON.parse(firstPartyCall[1]);
+      expect(firstPartyOutput).toHaveLength(1);
+      expect(firstPartyOutput[0].allowed).toBe(false);
+      expect(firstPartyOutput[0].message).toBe('Mutable release');
     });
   });
 });

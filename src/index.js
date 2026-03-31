@@ -246,24 +246,27 @@ export async function checkReleaseImmutability(octokit, owner, repo, ref) {
  * Check all actions from workflows
  * @param {Octokit} octokit - Octokit instance
  * @param {Array} actions - Array of action references
+ * @param {boolean} includeFirstParty - Whether to include first-party actions in checks
  * @returns {Promise<Object>} { mutable: Array, immutable: Array, firstParty: Array, byWorkflow: Object }
  */
-export async function checkAllActions(octokit, actions) {
+export async function checkAllActions(octokit, actions, includeFirstParty = false) {
   const mutable = [];
   const immutable = [];
   const firstParty = [];
   const byWorkflow = {};
 
-  // Separate first-party actions from third-party actions
-  const thirdPartyActions = actions.filter(a => !a.isFirstParty);
-  const firstPartyActions = actions.filter(a => a.isFirstParty);
+  // Separate first-party actions from actions to check
+  // When includeFirstParty is true, check all actions for immutability
+  const actionsToCheck = includeFirstParty ? actions : actions.filter(a => !a.isFirstParty);
+  const excludedFirstPartyActions = includeFirstParty ? [] : actions.filter(a => a.isFirstParty);
+  const allFirstPartyActions = actions.filter(a => a.isFirstParty);
 
   // Create a cache for immutability results
   const immutabilityCache = new Map();
 
-  // Process first-party actions (no API check needed) - deduplicate by uses string
-  const uniqueFirstPartyActions = Array.from(new Map(firstPartyActions.map(a => [a.uses, a])).values());
-  for (const action of uniqueFirstPartyActions) {
+  // Process excluded first-party actions (no API check needed) - deduplicate by uses string
+  const uniqueExcludedFirstParty = Array.from(new Map(excludedFirstPartyActions.map(a => [a.uses, a])).values());
+  for (const action of uniqueExcludedFirstParty) {
     const actionInfo = {
       uses: action.uses,
       owner: action.owner,
@@ -272,7 +275,9 @@ export async function checkAllActions(octokit, actions) {
       isFirstParty: true,
       immutable: true,
       releaseFound: false,
-      message: 'First-party action'
+      message: 'Excluded (first-party)',
+      allowed: true,
+      excluded: true
     };
     firstParty.push(actionInfo);
 
@@ -280,12 +285,12 @@ export async function checkAllActions(octokit, actions) {
     immutabilityCache.set(action.uses, {
       immutable: true,
       releaseFound: false,
-      message: 'First-party action'
+      message: 'Excluded (first-party)'
     });
   }
 
-  // Deduplicate third-party actions by uses string for API calls, but preserve workflow info
-  const uniqueActions = Array.from(new Map(thirdPartyActions.map(a => [a.uses, a])).values());
+  // Deduplicate actions being checked by uses string for API calls, but preserve workflow info
+  const uniqueActions = Array.from(new Map(actionsToCheck.map(a => [a.uses, a])).values());
 
   for (const action of uniqueActions) {
     core.info(`Checking ${action.owner}/${action.repo}@${action.ref}...`);
@@ -298,7 +303,7 @@ export async function checkAllActions(octokit, actions) {
       owner: action.owner,
       repo: action.repo,
       ref: action.ref,
-      isFirstParty: false,
+      isFirstParty: action.isFirstParty || false,
       ...result
     };
 
@@ -306,6 +311,24 @@ export async function checkAllActions(octokit, actions) {
       immutable.push(actionInfo);
     } else {
       mutable.push(actionInfo);
+    }
+  }
+
+  // Add checked first-party actions to the firstParty output with allowed/reason
+  if (includeFirstParty) {
+    const uniqueCheckedFirstParty = Array.from(new Map(allFirstPartyActions.map(a => [a.uses, a])).values());
+    for (const action of uniqueCheckedFirstParty) {
+      const cachedResult = immutabilityCache.get(action.uses);
+      firstParty.push({
+        uses: action.uses,
+        owner: action.owner,
+        repo: action.repo,
+        ref: action.ref,
+        isFirstParty: true,
+        ...cachedResult,
+        allowed: cachedResult.immutable,
+        excluded: false
+      });
     }
   }
 
@@ -339,7 +362,7 @@ export async function checkAllActions(octokit, actions) {
         ...cachedResult
       };
 
-      if (action.isFirstParty) {
+      if (!includeFirstParty && action.isFirstParty) {
         byWorkflow[workflowFile].firstParty.push(actionInfo);
       } else if (cachedResult.immutable) {
         byWorkflow[workflowFile].immutable.push(actionInfo);
@@ -360,6 +383,7 @@ export async function run() {
     // Get inputs
     const githubToken = core.getInput('github-token');
     const failOnMutable = core.getBooleanInput('fail-on-mutable');
+    const includeFirstParty = core.getBooleanInput('include-first-party');
     const workflowsInput = core.getInput('workflows');
     const excludeWorkflowsInput = core.getInput('exclude-workflows');
 
@@ -370,6 +394,7 @@ export async function run() {
 
     core.info('Starting Ensure Immutable Actions...');
     core.info(`Fail on mutable: ${failOnMutable}`);
+    core.info(`Include first-party: ${includeFirstParty}`);
 
     // Get workspace directory
     const workspaceDir = process.env.GITHUB_WORKSPACE || process.cwd();
@@ -428,7 +453,11 @@ export async function run() {
     const octokit = new Octokit({ auth: githubToken });
 
     // Check all actions
-    const { mutable, immutable, firstParty, byWorkflow } = await checkAllActions(octokit, allActions);
+    const { mutable, immutable, firstParty, byWorkflow } = await checkAllActions(
+      octokit,
+      allActions,
+      includeFirstParty
+    );
 
     // Set outputs
     core.setOutput('workflows-checked', JSON.stringify(workflowBasenames));
@@ -447,11 +476,11 @@ export async function run() {
         summary = summary.addRaw('# ❌ Immutable Actions Check - Failed\n\n');
       }
 
+      const excludedCount = firstParty.filter(a => a.excluded).length;
+
       summary = summary
         .addRaw(`**Workflows Checked:** ${workflowBasenames.join(', ')}\n\n`)
-        .addRaw(
-          `**Summary:** ${firstParty.length} first-party, ${immutable.length} immutable, ${mutable.length} mutable\n\n`
-        );
+        .addRaw(`**Summary:** ${excludedCount} excluded, ${immutable.length} immutable, ${mutable.length} mutable\n\n`);
 
       // Add a table for each workflow
       for (const workflowFile of workflowBasenames) {
@@ -473,31 +502,25 @@ export async function run() {
 
         summary = summary.addRaw(`### ${workflowStatus} ${workflowFile}\n\n`);
         summary = summary.addRaw(
-          `**Actions:** ${workflowFirstPartyCount} first-party, ${workflowImmutableCount} immutable, ${workflowMutableCount} mutable\n\n`
+          `**Actions:** ${workflowFirstPartyCount} excluded, ${workflowImmutableCount} immutable, ${workflowMutableCount} mutable\n\n`
         );
 
         // Build markdown table
         let markdownTable = '| Action | Status | Message |\n';
         markdownTable += '|--------|--------|----------|\n';
 
-        // Use concatenation order: first-party, then immutable, then mutable
-        const sortedActions = [...workflowData.firstParty, ...workflowData.immutable, ...workflowData.mutable];
-
-        for (const action of sortedActions) {
-          let status;
-          let message;
-          if (action.isFirstParty) {
-            status = '✅ First-party';
-            message = action.message;
-          } else if (action.immutable) {
-            status = '✅ Immutable';
-            message = action.message;
-          } else {
-            status = '❌ Mutable';
-            message = action.message;
-          }
+        // Iterate each category separately so status reflects check results, not just isFirstParty flag
+        for (const action of workflowData.firstParty) {
           const actionRef = formatActionReference(action.owner, action.repo, action.ref);
-          markdownTable += `| ${actionRef} | ${status} | ${message} |\n`;
+          markdownTable += `| ${actionRef} | ✅ First-party | ${action.message} |\n`;
+        }
+        for (const action of workflowData.immutable) {
+          const actionRef = formatActionReference(action.owner, action.repo, action.ref);
+          markdownTable += `| ${actionRef} | ✅ Immutable | ${action.message} |\n`;
+        }
+        for (const action of workflowData.mutable) {
+          const actionRef = formatActionReference(action.owner, action.repo, action.ref);
+          markdownTable += `| ${actionRef} | ❌ Mutable | ${action.message} |\n`;
         }
 
         summary = summary.addRaw(markdownTable).addRaw('\n');
@@ -522,9 +545,9 @@ export async function run() {
     }
 
     if (mutable.length > 0) {
-      core.warning(`\n❌ ${mutable.length} action(s) using mutable releases:`);
+      core.info(`\n❌ ${mutable.length} action(s) using mutable releases:`);
       for (const action of mutable) {
-        core.warning(`   - ${action.owner}/${action.repo}@${action.ref} (${action.message})`);
+        core.notice(`${action.owner}/${action.repo}@${action.ref} (${action.message})`);
       }
     }
 
@@ -535,7 +558,7 @@ export async function run() {
           `Please use immutable releases for supply chain security.`
       );
     } else if (mutable.length === 0) {
-      core.info('\n✅ All third-party actions are using immutable releases!');
+      core.info('\n✅ All actions are using immutable releases!');
     }
   } catch (error) {
     core.setFailed(`Action failed with error: ${error.message}`);

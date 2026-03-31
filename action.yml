@@ -20,6 +20,10 @@ inputs:
   exclude-workflows:
     description: 'Workflow files to exclude from checks (comma-separated). Only applies when workflows are not specified'
     required: false
+  include-first-party:
+    description: 'Include first-party actions (actions/*, github/*, octokit/*) in immutability checks. When true, first-party actions are also checked and appear in mutable-actions/immutable-actions outputs in addition to first-party-actions.'
+    required: false
+    default: 'false'
 
 outputs:
   mutable-actions:
@@ -27,7 +31,7 @@ outputs:
   immutable-actions:
     description: 'JSON array of actions using immutable releases'
   first-party-actions:
-    description: 'JSON array of first-party actions (actions/*, github/*, octokit/*)'
+    description: 'JSON array of all first-party actions with allowed and message fields indicating their status'
   all-passed:
     description: 'Boolean indicating if all checks passed'
   workflows-checked:
