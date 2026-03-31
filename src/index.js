@@ -289,7 +289,7 @@ export async function checkAllActions(octokit, actions, includeFirstParty = fals
     });
   }
 
-  // Deduplicate third-party actions by uses string for API calls, but preserve workflow info
+  // Deduplicate actions being checked by uses string for API calls, but preserve workflow info
   const uniqueActions = Array.from(new Map(actionsToCheck.map(a => [a.uses, a])).values());
 
   for (const action of uniqueActions) {
