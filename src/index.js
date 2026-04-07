@@ -22,7 +22,7 @@ import YAML from 'yaml';
 /**
  * Parse action reference from uses: field
  * @param {string} uses - The uses string (e.g., "actions/checkout@v4" or "owner/repo/path@ref")
- * @returns {Object|null} Parsed action { owner, repo, ref } or null if invalid
+ * @returns {Object|null} Parsed action { owner, repo, actionPath, ref } or null if invalid
  */
 export function parseActionReference(uses) {
   if (!uses || typeof uses !== 'string') {
@@ -40,13 +40,13 @@ export function parseActionReference(uses) {
   }
 
   // Parse format: owner/repo@ref or owner/repo/path@ref
-  const match = uses.match(/^([^/]+)\/([^/@]+)(?:\/[^@]*)?@(.+)$/);
+  const match = uses.match(/^([^/]+)\/([^/@]+)(?:\/(.+))?@(.+)$/);
   if (!match) {
     return null;
   }
 
-  const [, owner, repo, ref] = match;
-  return { owner, repo, ref };
+  const [, owner, repo, actionPath = '', ref] = match;
+  return { owner, repo, actionPath, ref };
 }
 
 /**
@@ -77,6 +77,19 @@ export function getUnsupportedReference(uses) {
  */
 export function shouldExcludeAction(owner) {
   return owner === 'actions' || owner === 'github' || owner === 'octokit';
+}
+
+/**
+ * Build a stable key for deduplication and cache lookups
+ * @param {Object} action - Action or unsupported record
+ * @returns {string} Stable cache key
+ */
+export function getActionCacheKey(action) {
+  if (action.supported === false) {
+    return `unsupported:${action.uses}:${action.message}`;
+  }
+
+  return `supported:${action.uses}`;
 }
 
 /**
@@ -298,6 +311,302 @@ export function extractActionsFromWorkflow(workflowPath, workspaceDir = process.
 }
 
 /**
+ * Determine whether a remote reference points to a reusable workflow file
+ * @param {Object} action - Parsed action reference
+ * @returns {boolean} True when the reference targets a reusable workflow
+ */
+export function isReusableWorkflowReference(action) {
+  return (
+    typeof action.actionPath === 'string' &&
+    action.actionPath.startsWith('.github/workflows/') &&
+    (action.actionPath.endsWith('.yml') || action.actionPath.endsWith('.yaml'))
+  );
+}
+
+/**
+ * Fetch file content from a remote repository at a given ref
+ * @param {Octokit} octokit - Octokit instance
+ * @param {string} owner - Repository owner
+ * @param {string} repo - Repository name
+ * @param {string} filePath - Path in the repository
+ * @param {string} ref - Git ref
+ * @returns {Promise<Object>} Remote file result
+ */
+export async function fetchRemoteFile(octokit, owner, repo, filePath, ref) {
+  try {
+    const response = await octokit.rest.repos.getContent({
+      owner,
+      repo,
+      path: filePath,
+      ref
+    });
+
+    const file = response.data;
+    if (!file || Array.isArray(file) || file.type !== 'file' || typeof file.content !== 'string') {
+      return {
+        found: false,
+        message: `Remote path is not a file: ${filePath}`
+      };
+    }
+
+    return {
+      found: true,
+      content: Buffer.from(file.content, file.encoding || 'base64').toString('utf8')
+    };
+  } catch (error) {
+    if (error.status === 404) {
+      return {
+        found: false,
+        message: `Remote file not found: ${filePath}`
+      };
+    }
+
+    return {
+      found: false,
+      message: `Failed to fetch remote file ${filePath}: ${error.message}`
+    };
+  }
+}
+
+/**
+ * Build an unsupported record for remote recursion boundaries
+ * @param {Object} action - Parsed action reference
+ * @param {string} message - Unsupported message
+ * @returns {Object} Unsupported action record
+ */
+export function createUnsupportedRemoteAction(action, message) {
+  return {
+    uses: action.uses,
+    workflowFile: action.workflowFile,
+    jobName: action.jobName,
+    stepName: action.stepName,
+    sourceWorkflowFile: action.sourceWorkflowFile || action.workflowFile,
+    sourceJobName: action.sourceJobName || action.jobName,
+    sourceStepName: action.sourceStepName || action.stepName,
+    supported: false,
+    unsupportedType: 'remote-recursion',
+    message
+  };
+}
+
+/**
+ * Clone a cached expansion template with caller workflow metadata
+ * @param {Object} template - Cached action template
+ * @param {Object} parentAction - Action being expanded
+ * @returns {Object} Instantiated action record
+ */
+export function instantiateExpandedAction(template, parentAction) {
+  return {
+    ...template,
+    workflowFile: parentAction.workflowFile,
+    jobName: template.jobName || parentAction.jobName,
+    stepName: template.stepName || parentAction.stepName,
+    sourceWorkflowFile: template.sourceWorkflowFile || parentAction.sourceWorkflowFile || parentAction.workflowFile,
+    sourceJobName: template.sourceJobName || parentAction.sourceJobName || parentAction.jobName,
+    sourceStepName: template.sourceStepName || parentAction.sourceStepName || parentAction.stepName
+  };
+}
+
+/**
+ * Expand a fetched remote reusable workflow into nested action templates
+ * @param {Octokit} octokit - Octokit instance
+ * @param {Object} action - Parsed action reference
+ * @param {string} content - Workflow file content
+ * @param {Object} options - Expansion options and caches
+ * @returns {Promise<Array>} Nested action templates
+ */
+export async function expandRemoteReusableWorkflow(octokit, action, content, options) {
+  try {
+    const workflow = YAML.parse(content);
+    const nestedTemplates = [];
+    const jobs = workflow?.jobs || {};
+
+    for (const [jobName, job] of Object.entries(jobs)) {
+      if (job?.uses) {
+        addParsedAction(
+          nestedTemplates,
+          job.uses,
+          {
+            jobName,
+            sourceWorkflowFile: action.sourceWorkflowFile || action.workflowFile,
+            sourceJobName: action.sourceJobName || action.jobName,
+            sourceStepName: action.sourceStepName || action.stepName
+          },
+          { workspaceDir: options.workspaceDir }
+        );
+      }
+
+      for (const step of job?.steps || []) {
+        if (step?.uses) {
+          addParsedAction(
+            nestedTemplates,
+            step.uses,
+            {
+              jobName,
+              stepName: step.name || 'unnamed step',
+              sourceWorkflowFile: action.sourceWorkflowFile || action.workflowFile,
+              sourceJobName: action.sourceJobName || action.jobName,
+              sourceStepName: action.sourceStepName || action.stepName
+            },
+            {
+              workspaceDir: options.workspaceDir
+            }
+          );
+        }
+      }
+    }
+
+    return await expandActionReferences(octokit, nestedTemplates, options);
+  } catch (error) {
+    return [createUnsupportedRemoteAction(action, `Failed to parse remote reusable workflow: ${error.message}`)];
+  }
+}
+
+/**
+ * Expand a fetched remote composite action into nested action templates
+ * @param {Octokit} octokit - Octokit instance
+ * @param {Object} action - Parsed action reference
+ * @param {string} content - Action metadata content
+ * @param {Object} options - Expansion options and caches
+ * @returns {Promise<Array>} Nested action templates
+ */
+export async function expandRemoteCompositeAction(octokit, action, content, options) {
+  try {
+    const actionDefinition = YAML.parse(content);
+    const actionType = actionDefinition?.runs?.using;
+
+    if (typeof actionType === 'string' && actionType.startsWith('node')) {
+      return [];
+    }
+
+    if (actionType === 'docker') {
+      return [createUnsupportedRemoteAction(action, 'Unsupported remote action type: docker')];
+    }
+
+    if (actionType !== 'composite') {
+      return [createUnsupportedRemoteAction(action, `Unsupported remote action type: ${actionType || 'unknown'}`)];
+    }
+
+    const nestedTemplates = [];
+    const currentActionDir = action.actionPath || '.';
+
+    for (const step of actionDefinition?.runs?.steps || []) {
+      if (!step?.uses) {
+        continue;
+      }
+
+      let nestedUses = step.uses;
+      if (nestedUses.startsWith('./')) {
+        const resolvedPath = path.posix.normalize(path.posix.join(currentActionDir, nestedUses));
+        nestedUses = `${action.owner}/${action.repo}/${resolvedPath}@${action.ref}`;
+      }
+
+      addParsedAction(
+        nestedTemplates,
+        nestedUses,
+        {
+          stepName: step.name || 'unnamed step',
+          sourceWorkflowFile: action.sourceWorkflowFile || action.workflowFile,
+          sourceJobName: action.sourceJobName || action.jobName,
+          sourceStepName: action.sourceStepName || action.stepName
+        },
+        {
+          workspaceDir: options.workspaceDir
+        }
+      );
+    }
+
+    return await expandActionReferences(octokit, nestedTemplates, options);
+  } catch (error) {
+    return [createUnsupportedRemoteAction(action, `Failed to parse remote action metadata: ${error.message}`)];
+  }
+}
+
+/**
+ * Expand a remote reference into nested action templates
+ * @param {Octokit} octokit - Octokit instance
+ * @param {Object} action - Parsed action reference
+ * @param {Object} options - Expansion options and caches
+ * @returns {Promise<Array>} Expanded templates
+ */
+export async function expandRemoteReference(octokit, action, options) {
+  const cacheKey = action.uses;
+  if (options.expansionCache.has(cacheKey)) {
+    return options.expansionCache.get(cacheKey);
+  }
+
+  if (options.expansionStack.has(cacheKey)) {
+    core.warning(`Skipping recursive remote reference cycle: ${action.uses}`);
+    return [];
+  }
+
+  const nextOptions = {
+    ...options,
+    expansionStack: new Set(options.expansionStack)
+  };
+  nextOptions.expansionStack.add(cacheKey);
+
+  let expandedTemplates = [];
+
+  if (isReusableWorkflowReference(action)) {
+    const workflowFile = await fetchRemoteFile(octokit, action.owner, action.repo, action.actionPath, action.ref);
+    expandedTemplates = workflowFile.found
+      ? await expandRemoteReusableWorkflow(octokit, action, workflowFile.content, nextOptions)
+      : [createUnsupportedRemoteAction(action, workflowFile.message)];
+  } else {
+    const metadataPaths = action.actionPath
+      ? [`${action.actionPath}/action.yml`, `${action.actionPath}/action.yaml`]
+      : ['action.yml', 'action.yaml'];
+
+    let metadataResult = null;
+    for (const metadataPath of metadataPaths) {
+      const candidate = await fetchRemoteFile(octokit, action.owner, action.repo, metadataPath, action.ref);
+      if (candidate.found) {
+        metadataResult = candidate;
+        break;
+      }
+
+      if (!metadataResult) {
+        metadataResult = candidate;
+      }
+    }
+
+    expandedTemplates = metadataResult?.found
+      ? await expandRemoteCompositeAction(octokit, action, metadataResult.content, nextOptions)
+      : [createUnsupportedRemoteAction(action, metadataResult?.message || 'Remote action metadata not found')];
+  }
+
+  options.expansionCache.set(cacheKey, expandedTemplates);
+  return expandedTemplates;
+}
+
+/**
+ * Expand action references by recursing into remote composite actions and reusable workflows
+ * @param {Octokit} octokit - Octokit instance
+ * @param {Array} actions - Action references to expand
+ * @param {Object} options - Expansion options and caches
+ * @returns {Promise<Array>} Expanded action references
+ */
+export async function expandActionReferences(octokit, actions, options) {
+  const expandedActions = [];
+
+  for (const action of actions) {
+    expandedActions.push(action);
+
+    if (action.supported === false) {
+      continue;
+    }
+
+    const nestedTemplates = await expandRemoteReference(octokit, action, options);
+    for (const template of nestedTemplates) {
+      expandedActions.push(instantiateExpandedAction(template, action));
+    }
+  }
+
+  return expandedActions;
+}
+
+/**
  * Get list of workflow files to check
  * @param {string} workflowsInput - Comma-separated workflow files (optional)
  * @param {string} excludeWorkflowsInput - Comma-separated workflows to exclude (optional)
@@ -365,10 +674,12 @@ export function isFullSHA(ref) {
  * @param {string} owner - Repository owner
  * @param {string} repo - Repository name
  * @param {string} ref - Git ref (tag, SHA, branch)
+ * @param {string} actionPath - Optional path within the repository
  * @returns {string} Markdown formatted action reference with link
  */
-export function formatActionReference(owner, repo, ref) {
-  const actionRef = `${owner}/${repo}@${ref}`;
+export function formatActionReference(owner, repo, ref, actionPath = '') {
+  const repositoryPath = actionPath ? `${owner}/${repo}/${actionPath}` : `${owner}/${repo}`;
+  const actionRef = `${repositoryPath}@${ref}`;
 
   // SHAs already get hyperlinked by GitHub automatically, so just return plain text
   if (isFullSHA(ref)) {
@@ -376,15 +687,31 @@ export function formatActionReference(owner, repo, ref) {
   }
 
   // For tags and branches, create a hyperlink to the repository
-  const url = `https://github.com/${owner}/${repo}/tree/${ref}`;
+  const url = actionPath
+    ? `https://github.com/${owner}/${repo}/tree/${ref}/${actionPath}`
+    : `https://github.com/${owner}/${repo}/tree/${ref}`;
   return `[${actionRef}](${url})`;
+}
+
+/**
+ * Format an action reference without markdown for logs and outputs
+ * @param {Object} action - Action-like object with owner/repo/ref/actionPath
+ * @returns {string} Plain text action reference
+ */
+export function formatActionReferenceText(action) {
+  if (!action?.owner || !action?.repo || !action?.ref) {
+    return action?.uses || '';
+  }
+
+  const repositoryPath = action.actionPath
+    ? `${action.owner}/${action.repo}/${action.actionPath}`
+    : `${action.owner}/${action.repo}`;
+  return `${repositoryPath}@${action.ref}`;
 }
 
 /**
  * Format a caller-side source location for summary reporting
  * @param {Object} sourceLocation - Caller-side source location
- * @param {string} repository - GitHub repository in owner/name form
- * @param {string} sha - Git commit SHA for summary links
  * @returns {string} Human-readable location text
  */
 export function formatSourceLocationLink(sourceLocation, repository, sha) {
@@ -512,7 +839,7 @@ export async function checkAllActions(octokit, actions, includeFirstParty = fals
   const immutabilityCache = new Map();
 
   // Process unsupported actions - deduplicate by uses string
-  const uniqueUnsupportedActions = Array.from(new Map(unsupportedActions.map(a => [a.uses, a])).values());
+  const uniqueUnsupportedActions = Array.from(new Map(unsupportedActions.map(a => [getActionCacheKey(a), a])).values());
   for (const action of uniqueUnsupportedActions) {
     const actionInfo = {
       uses: action.uses,
@@ -528,7 +855,7 @@ export async function checkAllActions(octokit, actions, includeFirstParty = fals
       message: action.message
     };
     unsupported.push(actionInfo);
-    immutabilityCache.set(action.uses, actionInfo);
+    immutabilityCache.set(getActionCacheKey(action), actionInfo);
   }
 
   // Process excluded first-party actions (no API check needed) - deduplicate by uses string
@@ -549,7 +876,7 @@ export async function checkAllActions(octokit, actions, includeFirstParty = fals
     firstParty.push(actionInfo);
 
     // Cache result for workflow grouping
-    immutabilityCache.set(action.uses, {
+    immutabilityCache.set(getActionCacheKey(action), {
       immutable: true,
       releaseFound: false,
       message: 'Excluded (first-party)'
@@ -557,18 +884,19 @@ export async function checkAllActions(octokit, actions, includeFirstParty = fals
   }
 
   // Deduplicate actions being checked by uses string for API calls, but preserve workflow info
-  const uniqueActions = Array.from(new Map(actionsToCheck.map(a => [a.uses, a])).values());
+  const uniqueActions = Array.from(new Map(actionsToCheck.map(a => [getActionCacheKey(a), a])).values());
 
   for (const action of uniqueActions) {
-    core.info(`Checking ${action.owner}/${action.repo}@${action.ref}...`);
+    core.info(`Checking ${formatActionReferenceText(action)}...`);
 
     const result = await checkReleaseImmutability(octokit, action.owner, action.repo, action.ref);
-    immutabilityCache.set(action.uses, result);
+    immutabilityCache.set(getActionCacheKey(action), result);
 
     const actionInfo = {
       uses: action.uses,
       owner: action.owner,
       repo: action.repo,
+      actionPath: action.actionPath || '',
       ref: action.ref,
       isFirstParty: action.isFirstParty || false,
       ...result
@@ -585,11 +913,12 @@ export async function checkAllActions(octokit, actions, includeFirstParty = fals
   if (includeFirstParty) {
     const uniqueCheckedFirstParty = Array.from(new Map(allFirstPartyActions.map(a => [a.uses, a])).values());
     for (const action of uniqueCheckedFirstParty) {
-      const cachedResult = immutabilityCache.get(action.uses);
+      const cachedResult = immutabilityCache.get(getActionCacheKey(action));
       firstParty.push({
         uses: action.uses,
         owner: action.owner,
         repo: action.repo,
+        actionPath: action.actionPath || '',
         ref: action.ref,
         isFirstParty: true,
         ...cachedResult,
@@ -618,6 +947,7 @@ export async function checkAllActions(octokit, actions, includeFirstParty = fals
     const uniqueWorkflowActions = Array.from(
       workflowActions
         .reduce((groupedActions, action) => {
+          const cacheKey = getActionCacheKey(action);
           const sourceLocation = {
             workflowFile: action.sourceWorkflowFile || action.workflowFile,
             jobName: action.sourceJobName || action.jobName,
@@ -625,14 +955,14 @@ export async function checkAllActions(octokit, actions, includeFirstParty = fals
           };
           const sourceKey = `${sourceLocation.workflowFile || ''}\u0000${sourceLocation.jobName || ''}\u0000${sourceLocation.stepName || ''}`;
 
-          if (!groupedActions.has(action.uses)) {
-            groupedActions.set(action.uses, {
+          if (!groupedActions.has(cacheKey)) {
+            groupedActions.set(cacheKey, {
               action,
               sourceLocations: new Map()
             });
           }
 
-          groupedActions.get(action.uses).sourceLocations.set(sourceKey, sourceLocation);
+          groupedActions.get(cacheKey).sourceLocations.set(sourceKey, sourceLocation);
           return groupedActions;
         }, new Map())
         .values()
@@ -642,11 +972,12 @@ export async function checkAllActions(octokit, actions, includeFirstParty = fals
     }));
 
     for (const action of uniqueWorkflowActions) {
-      const cachedResult = immutabilityCache.get(action.uses);
+      const cachedResult = immutabilityCache.get(getActionCacheKey(action));
       const actionInfo = {
         uses: action.uses,
         owner: action.owner,
         repo: action.repo,
+        actionPath: action.actionPath || '',
         ref: action.ref,
         workflowFile: action.workflowFile,
         sourceLocations: action.sourceLocations || [],
@@ -749,10 +1080,16 @@ export async function run() {
     // Initialize Octokit
     const octokit = new Octokit({ auth: githubToken });
 
+    const expandedActions = await expandActionReferences(octokit, allActions, {
+      workspaceDir,
+      expansionCache: new Map(),
+      expansionStack: new Set()
+    });
+
     // Check all actions
     const { mutable, immutable, unsupported, firstParty, byWorkflow } = await checkAllActions(
       octokit,
-      allActions,
+      expandedActions,
       includeFirstParty
     );
 
@@ -813,15 +1150,15 @@ export async function run() {
 
         // Iterate each category separately so status reflects check results, not just isFirstParty flag
         for (const action of workflowData.firstParty) {
-          const actionRef = formatActionReference(action.owner, action.repo, action.ref);
+          const actionRef = formatActionReference(action.owner, action.repo, action.ref, action.actionPath);
           markdownTable += `| ${actionRef} | ✅ First-party | ${action.message} |\n`;
         }
         for (const action of workflowData.immutable) {
-          const actionRef = formatActionReference(action.owner, action.repo, action.ref);
+          const actionRef = formatActionReference(action.owner, action.repo, action.ref, action.actionPath);
           markdownTable += `| ${actionRef} | ✅ Immutable | ${action.message} |\n`;
         }
         for (const action of workflowData.mutable) {
-          const actionRef = formatActionReference(action.owner, action.repo, action.ref);
+          const actionRef = formatActionReference(action.owner, action.repo, action.ref, action.actionPath);
           const message = formatSummaryMessage(action.message, action.sourceLocations, true);
           markdownTable += `| ${actionRef} | ❌ Mutable | ${message} |\n`;
         }
@@ -848,14 +1185,14 @@ export async function run() {
     if (immutable.length > 0) {
       core.info(`\n✅ ${immutable.length} action(s) using immutable releases:`);
       for (const action of immutable) {
-        core.info(`   - ${action.owner}/${action.repo}@${action.ref}`);
+        core.info(`   - ${formatActionReferenceText(action)}`);
       }
     }
 
     if (mutable.length > 0) {
       core.info(`\n❌ ${mutable.length} action(s) using mutable releases:`);
       for (const action of mutable) {
-        core.notice(`${action.owner}/${action.repo}@${action.ref} (${action.message})`);
+        core.notice(`${formatActionReferenceText(action)} (${action.message})`);
       }
     }
 
