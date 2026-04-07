@@ -53,6 +53,7 @@ const {
   formatActionReference,
   formatSourceLocationLink,
   formatSummaryMessage,
+  formatTraversalHint,
   getUnsupportedReference,
   getWorkflowFiles,
   isReusableWorkflowReference,
@@ -643,6 +644,18 @@ runs:
       ).toBe(
         'No release found for this reference<br>- [targets-mutable.yml](https://github.com/Wuodan/ensure-immutable-actions-test/blob/1234567890abcdef1234567890abcdef12345678/.github/workflows/targets-mutable.yml)'
       );
+    });
+
+    test('should format a traversal hint for recursive mutable findings', () => {
+      expect(
+        formatTraversalHint({
+          uses: 'owner/nested-action@main',
+          entrypointUses: 'owner/repo/.github/workflows/reusable.yml@main',
+          sourceWorkflowFile: 'targets-mutable.yml',
+          sourceJobName: 'remote-reusable',
+          sourceStepName: 'unnamed step'
+        })
+      ).toBe('owner/nested-action@main reached via targets-mutable.yml');
     });
   });
 
@@ -1291,6 +1304,7 @@ runs:
         actionPath: '',
         ref: 'v2',
         workflowFile: 'ci.yml',
+        entrypointUses: 'owner/repo/.github/workflows/reusable.yml@v1',
         jobName: 'nested',
         stepName: 'unnamed step',
         sourceWorkflowFile: 'ci.yml',

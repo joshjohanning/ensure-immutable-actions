@@ -272,6 +272,7 @@ export function extractActionsFromWorkflow(workflowPath, workspaceDir = process.
           {
             workflowFile,
             jobName,
+            entrypointUses: job.uses,
             sourceWorkflowFile: workflowFile,
             sourceJobName: jobName
           },
@@ -291,6 +292,7 @@ export function extractActionsFromWorkflow(workflowPath, workspaceDir = process.
               workflowFile,
               jobName,
               stepName: step.name || 'unnamed step',
+              entrypointUses: step.uses,
               sourceWorkflowFile: workflowFile,
               sourceJobName: jobName,
               sourceStepName: step.name || 'unnamed step'
@@ -401,6 +403,7 @@ export function instantiateExpandedAction(template, parentAction) {
     workflowFile: parentAction.workflowFile,
     jobName: template.jobName || parentAction.jobName,
     stepName: template.stepName || parentAction.stepName,
+    entrypointUses: template.entrypointUses || parentAction.entrypointUses || parentAction.uses,
     sourceWorkflowFile: template.sourceWorkflowFile || parentAction.sourceWorkflowFile || parentAction.workflowFile,
     sourceJobName: template.sourceJobName || parentAction.sourceJobName || parentAction.jobName,
     sourceStepName: template.sourceStepName || parentAction.sourceStepName || parentAction.stepName
@@ -427,10 +430,11 @@ export async function expandRemoteReusableWorkflow(octokit, action, content, opt
           nestedTemplates,
           job.uses,
           {
-            jobName,
-            sourceWorkflowFile: action.sourceWorkflowFile || action.workflowFile,
-            sourceJobName: action.sourceJobName || action.jobName,
-            sourceStepName: action.sourceStepName || action.stepName
+              jobName,
+              entrypointUses: action.entrypointUses || action.uses,
+              sourceWorkflowFile: action.sourceWorkflowFile || action.workflowFile,
+              sourceJobName: action.sourceJobName || action.jobName,
+              sourceStepName: action.sourceStepName || action.stepName
           },
           { workspaceDir: options.workspaceDir }
         );
@@ -444,6 +448,7 @@ export async function expandRemoteReusableWorkflow(octokit, action, content, opt
             {
               jobName,
               stepName: step.name || 'unnamed step',
+              entrypointUses: action.entrypointUses || action.uses,
               sourceWorkflowFile: action.sourceWorkflowFile || action.workflowFile,
               sourceJobName: action.sourceJobName || action.jobName,
               sourceStepName: action.sourceStepName || action.stepName
@@ -506,6 +511,7 @@ export async function expandRemoteCompositeAction(octokit, action, content, opti
         nestedUses,
         {
           stepName: step.name || 'unnamed step',
+          entrypointUses: action.entrypointUses || action.uses,
           sourceWorkflowFile: action.sourceWorkflowFile || action.workflowFile,
           sourceJobName: action.sourceJobName || action.jobName,
           sourceStepName: action.sourceStepName || action.stepName
@@ -753,6 +759,20 @@ export function formatSummaryMessage(message, sourceLocations = [], linkSources 
 }
 
 /**
+ * Format a low-impact traversal hint for recursive mutable findings
+ * @param {Object} action - Mutable action info
+ * @returns {string|null} Traversal hint or null when not needed
+ */
+export function formatTraversalHint(action) {
+  if (!action?.entrypointUses || action.entrypointUses === action.uses) {
+    return null;
+  }
+
+  const workflowFile = action.sourceWorkflowFile || action.workflowFile;
+  return `${formatActionReferenceText(action)} reached via ${workflowFile}`;
+}
+
+/**
  * Check if a release is immutable via GitHub API
  * Note: The 'immutable' property is a GitHub feature that indicates whether a release
  * can be modified or deleted. This only applies to tag-based releases.
@@ -898,6 +918,10 @@ export async function checkAllActions(octokit, actions, includeFirstParty = fals
       repo: action.repo,
       actionPath: action.actionPath || '',
       ref: action.ref,
+      entrypointUses: action.entrypointUses || action.uses,
+      sourceWorkflowFile: action.sourceWorkflowFile || action.workflowFile,
+      sourceJobName: action.sourceJobName || action.jobName,
+      sourceStepName: action.sourceStepName || action.stepName,
       isFirstParty: action.isFirstParty || false,
       ...result
     };
@@ -1193,6 +1217,10 @@ export async function run() {
       core.info(`\n❌ ${mutable.length} action(s) using mutable releases:`);
       for (const action of mutable) {
         core.notice(`${formatActionReferenceText(action)} (${action.message})`);
+        const traversalHint = formatTraversalHint(action);
+        if (traversalHint) {
+          core.notice(traversalHint);
+        }
       }
     }
 
