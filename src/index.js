@@ -258,7 +258,9 @@ export function extractActionsFromWorkflow(workflowPath, workspaceDir = process.
           job.uses,
           {
             workflowFile,
-            jobName
+            jobName,
+            sourceWorkflowFile: workflowFile,
+            sourceJobName: jobName
           },
           {
             workspaceDir
@@ -275,7 +277,10 @@ export function extractActionsFromWorkflow(workflowPath, workspaceDir = process.
             {
               workflowFile,
               jobName,
-              stepName: step.name || 'unnamed step'
+              stepName: step.name || 'unnamed step',
+              sourceWorkflowFile: workflowFile,
+              sourceJobName: jobName,
+              sourceStepName: step.name || 'unnamed step'
             },
             {
               workspaceDir
@@ -376,6 +381,51 @@ export function formatActionReference(owner, repo, ref) {
 }
 
 /**
+ * Format a caller-side source location for summary reporting
+ * @param {Object} sourceLocation - Caller-side source location
+ * @param {string} repository - GitHub repository in owner/name form
+ * @param {string} sha - Git commit SHA for summary links
+ * @returns {string} Human-readable location text
+ */
+export function formatSourceLocationLink(sourceLocation, repository, sha) {
+  const locationText = sourceLocation?.workflowFile || 'workflow';
+
+  if (!repository || !sha || !sourceLocation?.workflowFile) {
+    return locationText;
+  }
+
+  const workflowPath = `.github/workflows/${sourceLocation.workflowFile}`;
+  const url = `https://github.com/${repository}/blob/${sha}/${workflowPath}`;
+  return `[${locationText}](${url})`;
+}
+
+/**
+ * Append caller-side source locations to a summary message when useful
+ * @param {string} message - Base status message
+ * @param {Array} sourceLocations - Caller-side source locations
+ * @param {boolean} linkSources - Whether to render source locations as links
+ * @returns {string} Message with optional source location details
+ */
+export function formatSummaryMessage(message, sourceLocations = [], linkSources = false) {
+  if (!Array.isArray(sourceLocations) || sourceLocations.length === 0) {
+    return message;
+  }
+
+  const formattedSources = Array.from(
+    new Set(
+      sourceLocations.map(source =>
+        linkSources
+          ? formatSourceLocationLink(source, process.env.GITHUB_REPOSITORY, process.env.GITHUB_SHA)
+          : source?.workflowFile || 'workflow'
+      )
+    )
+  );
+
+  const bulletList = formattedSources.map(source => `- ${source}`).join('<br>');
+  return `${message}<br>${bulletList}`;
+}
+
+/**
  * Check if a release is immutable via GitHub API
  * Note: The 'immutable' property is a GitHub feature that indicates whether a release
  * can be modified or deleted. This only applies to tag-based releases.
@@ -467,6 +517,13 @@ export async function checkAllActions(octokit, actions, includeFirstParty = fals
     const actionInfo = {
       uses: action.uses,
       supported: false,
+      sourceLocations: [
+        {
+          workflowFile: action.sourceWorkflowFile || action.workflowFile,
+          jobName: action.sourceJobName || action.jobName,
+          stepName: action.sourceStepName || action.stepName
+        }
+      ],
       unsupportedType: action.unsupportedType,
       message: action.message
     };
@@ -558,7 +615,31 @@ export async function checkAllActions(octokit, actions, includeFirstParty = fals
     byWorkflow[workflowFile] = { mutable: [], immutable: [], unsupported: [], firstParty: [] };
 
     // Deduplicate by uses string within this workflow
-    const uniqueWorkflowActions = Array.from(new Map(workflowActions.map(a => [a.uses, a])).values());
+    const uniqueWorkflowActions = Array.from(
+      workflowActions
+        .reduce((groupedActions, action) => {
+          const sourceLocation = {
+            workflowFile: action.sourceWorkflowFile || action.workflowFile,
+            jobName: action.sourceJobName || action.jobName,
+            stepName: action.sourceStepName || action.stepName
+          };
+          const sourceKey = `${sourceLocation.workflowFile || ''}\u0000${sourceLocation.jobName || ''}\u0000${sourceLocation.stepName || ''}`;
+
+          if (!groupedActions.has(action.uses)) {
+            groupedActions.set(action.uses, {
+              action,
+              sourceLocations: new Map()
+            });
+          }
+
+          groupedActions.get(action.uses).sourceLocations.set(sourceKey, sourceLocation);
+          return groupedActions;
+        }, new Map())
+        .values()
+    ).map(({ action, sourceLocations }) => ({
+      ...action,
+      sourceLocations: Array.from(sourceLocations.values())
+    }));
 
     for (const action of uniqueWorkflowActions) {
       const cachedResult = immutabilityCache.get(action.uses);
@@ -568,6 +649,7 @@ export async function checkAllActions(octokit, actions, includeFirstParty = fals
         repo: action.repo,
         ref: action.ref,
         workflowFile: action.workflowFile,
+        sourceLocations: action.sourceLocations || [],
         supported: action.supported !== false,
         isFirstParty: action.isFirstParty || false,
         ...cachedResult
@@ -726,8 +808,8 @@ export async function run() {
         );
 
         // Build markdown table
-        let markdownTable = '| Action | Status | Message |\n';
-        markdownTable += '|--------|--------|----------|\n';
+        let markdownTable = '| Action | Status | Message / Found In |\n';
+        markdownTable += '|--------|--------|--------------------|\n';
 
         // Iterate each category separately so status reflects check results, not just isFirstParty flag
         for (const action of workflowData.firstParty) {
@@ -740,10 +822,12 @@ export async function run() {
         }
         for (const action of workflowData.mutable) {
           const actionRef = formatActionReference(action.owner, action.repo, action.ref);
-          markdownTable += `| ${actionRef} | ❌ Mutable | ${action.message} |\n`;
+          const message = formatSummaryMessage(action.message, action.sourceLocations, true);
+          markdownTable += `| ${actionRef} | ❌ Mutable | ${message} |\n`;
         }
         for (const action of workflowData.unsupported) {
-          markdownTable += `| ${action.uses} | ⚠️ Unsupported | ${action.message} |\n`;
+          const message = formatSummaryMessage(action.message, action.sourceLocations, true);
+          markdownTable += `| ${action.uses} | ⚠️ Unsupported | ${message} |\n`;
         }
 
         summary = summary.addRaw(markdownTable).addRaw('\n');

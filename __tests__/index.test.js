@@ -46,6 +46,8 @@ const {
   shouldExcludeAction,
   extractActionsFromWorkflow,
   findLocalActionMetadataFile,
+  formatSourceLocationLink,
+  formatSummaryMessage,
   getUnsupportedReference,
   getWorkflowFiles,
   checkReleaseImmutability,
@@ -545,6 +547,57 @@ runs:
     });
   });
 
+  describe('summary source formatting', () => {
+    test('should format source locations as workflow links when repository context is available', () => {
+      expect(
+        formatSourceLocationLink(
+          {
+            workflowFile: 'targets-mutable.yml',
+            jobName: 'test',
+            stepName: 'Check npm version'
+          },
+          'Wuodan/ensure-immutable-actions-test',
+          '1234567890abcdef1234567890abcdef12345678'
+        )
+      ).toBe(
+        '[targets-mutable.yml](https://github.com/Wuodan/ensure-immutable-actions-test/blob/1234567890abcdef1234567890abcdef12345678/.github/workflows/targets-mutable.yml)'
+      );
+    });
+
+    test('should append linked source locations to summary messages', () => {
+      process.env.GITHUB_REPOSITORY = 'Wuodan/ensure-immutable-actions-test';
+      process.env.GITHUB_SHA = '1234567890abcdef1234567890abcdef12345678';
+
+      expect(
+        formatSummaryMessage(
+          'No release found for this reference',
+          [{ workflowFile: 'targets-mutable.yml', jobName: 'test', stepName: 'Check npm version' }],
+          true
+        )
+      ).toBe(
+        'No release found for this reference<br>- [targets-mutable.yml](https://github.com/Wuodan/ensure-immutable-actions-test/blob/1234567890abcdef1234567890abcdef12345678/.github/workflows/targets-mutable.yml)'
+      );
+    });
+
+    test('should deduplicate identical workflow links in summary messages', () => {
+      process.env.GITHUB_REPOSITORY = 'Wuodan/ensure-immutable-actions-test';
+      process.env.GITHUB_SHA = '1234567890abcdef1234567890abcdef12345678';
+
+      expect(
+        formatSummaryMessage(
+          'No release found for this reference',
+          [
+            { workflowFile: 'targets-mutable.yml', jobName: 'job-a', stepName: 'step-a' },
+            { workflowFile: 'targets-mutable.yml', jobName: 'job-b', stepName: 'step-b' }
+          ],
+          true
+        )
+      ).toBe(
+        'No release found for this reference<br>- [targets-mutable.yml](https://github.com/Wuodan/ensure-immutable-actions-test/blob/1234567890abcdef1234567890abcdef12345678/.github/workflows/targets-mutable.yml)'
+      );
+    });
+  });
+
   describe('checkReleaseImmutability', () => {
     test('should return immutable true for full SHA references', async () => {
       const result = await checkReleaseImmutability(
@@ -737,6 +790,57 @@ runs:
       // But should appear in both workflows
       expect(result.byWorkflow['workflow1.yml'].immutable).toHaveLength(1);
       expect(result.byWorkflow['workflow2.yml'].immutable).toHaveLength(1);
+    });
+
+    test('should preserve all caller-side source locations when deduplicating within a workflow', async () => {
+      const actions = [
+        {
+          uses: 'owner/repo@v1',
+          owner: 'owner',
+          repo: 'repo',
+          ref: 'v1',
+          workflowFile: 'workflow1.yml',
+          jobName: 'lint',
+          stepName: 'First use',
+          sourceWorkflowFile: 'workflow1.yml',
+          sourceJobName: 'lint',
+          sourceStepName: 'First use',
+          isFirstParty: false
+        },
+        {
+          uses: 'owner/repo@v1',
+          owner: 'owner',
+          repo: 'repo',
+          ref: 'v1',
+          workflowFile: 'workflow1.yml',
+          jobName: 'test',
+          stepName: 'Second use',
+          sourceWorkflowFile: 'workflow1.yml',
+          sourceJobName: 'test',
+          sourceStepName: 'Second use',
+          isFirstParty: false
+        }
+      ];
+
+      mockOctokit.rest.repos.getReleaseByTag.mockResolvedValue({
+        data: { immutable: true }
+      });
+
+      const result = await checkAllActions(mockOctokit, actions);
+
+      expect(result.byWorkflow['workflow1.yml'].immutable).toHaveLength(1);
+      expect(result.byWorkflow['workflow1.yml'].immutable[0].sourceLocations).toEqual([
+        {
+          workflowFile: 'workflow1.yml',
+          jobName: 'lint',
+          stepName: 'First use'
+        },
+        {
+          workflowFile: 'workflow1.yml',
+          jobName: 'test',
+          stepName: 'Second use'
+        }
+      ]);
     });
 
     test('should handle first-party actions without API calls', async () => {
