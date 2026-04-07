@@ -148,6 +148,8 @@ describe('Ensure Immutable Actions', () => {
 name: CI
 on: push
 jobs:
+  reusable:
+    uses: owner/platform-workflows/.github/workflows/test.yml@v1
   test:
     runs-on: ubuntu-latest
     steps:
@@ -162,28 +164,66 @@ jobs:
 
       const actions = extractActionsFromWorkflow(tempFile);
 
-      // Should now include all actions (first-party and third-party)
-      expect(actions).toHaveLength(3);
+      // Should now include reusable workflows plus step-level actions
+      expect(actions).toHaveLength(4);
 
-      // First action should be first-party
-      expect(actions[0].owner).toBe('actions');
-      expect(actions[0].repo).toBe('checkout');
-      expect(actions[0].ref).toBe('v4');
-      expect(actions[0].isFirstParty).toBe(true);
+      // Reusable workflow should be extracted from the job
+      expect(actions[0].owner).toBe('owner');
+      expect(actions[0].repo).toBe('platform-workflows');
+      expect(actions[0].ref).toBe('v1');
+      expect(actions[0].jobName).toBe('reusable');
+      expect(actions[0].stepName).toBeUndefined();
+      expect(actions[0].isFirstParty).toBe(false);
       expect(actions[0].workflowFile).toBe('test-workflow.yml');
 
-      // Second action should be third-party
-      expect(actions[1].owner).toBe('joshjohanning');
-      expect(actions[1].repo).toBe('npm-version-check-action');
-      expect(actions[1].ref).toBe('v1');
-      expect(actions[1].stepName).toBe('Check npm version');
-      expect(actions[1].isFirstParty).toBe(false);
+      // First step action should be first-party
+      expect(actions[1].owner).toBe('actions');
+      expect(actions[1].repo).toBe('checkout');
+      expect(actions[1].ref).toBe('v4');
+      expect(actions[1].isFirstParty).toBe(true);
       expect(actions[1].workflowFile).toBe('test-workflow.yml');
 
-      // Third action should be third-party
-      expect(actions[2].owner).toBe('third-party');
+      // Second step action should be third-party
+      expect(actions[2].owner).toBe('joshjohanning');
+      expect(actions[2].repo).toBe('npm-version-check-action');
+      expect(actions[2].ref).toBe('v1');
+      expect(actions[2].stepName).toBe('Check npm version');
       expect(actions[2].isFirstParty).toBe(false);
       expect(actions[2].workflowFile).toBe('test-workflow.yml');
+
+      // Third step action should be third-party
+      expect(actions[3].owner).toBe('third-party');
+      expect(actions[3].isFirstParty).toBe(false);
+      expect(actions[3].workflowFile).toBe('test-workflow.yml');
+
+      fs.unlinkSync(tempFile);
+    });
+
+    test('should extract reusable workflows without steps', () => {
+      const workflowContent = `
+name: Deploy
+on: workflow_dispatch
+jobs:
+  deploy:
+    uses: owner/reusable-workflows/.github/workflows/deploy.yml@v2
+`;
+
+      const tempFile = '/tmp/test-workflow-reusable.yml';
+      fs.writeFileSync(tempFile, workflowContent);
+
+      const actions = extractActionsFromWorkflow(tempFile);
+
+      expect(actions).toHaveLength(1);
+      expect(actions[0]).toMatchObject({
+        uses: 'owner/reusable-workflows/.github/workflows/deploy.yml@v2',
+        owner: 'owner',
+        repo: 'reusable-workflows',
+        ref: 'v2',
+        jobName: 'deploy',
+        workflowFile: 'test-workflow-reusable.yml',
+        isFirstParty: false
+      });
+      expect(actions[0].stepName).toBeUndefined();
 
       fs.unlinkSync(tempFile);
     });

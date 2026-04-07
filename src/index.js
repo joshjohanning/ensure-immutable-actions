@@ -59,6 +59,26 @@ export function shouldExcludeAction(owner) {
 }
 
 /**
+ * Add a parsed action reference to the collection when the uses string is supported
+ * @param {Array} actions - Mutable collection of extracted action references
+ * @param {string} uses - Raw uses string from a workflow job or step
+ * @param {Object} metadata - Additional metadata to attach to the extracted action
+ */
+export function addParsedAction(actions, uses, metadata) {
+  const parsed = parseActionReference(uses);
+  if (!parsed) {
+    return;
+  }
+
+  actions.push({
+    uses,
+    ...parsed,
+    ...metadata,
+    isFirstParty: shouldExcludeAction(parsed.owner)
+  });
+}
+
+/**
  * Extract all action references from a workflow file
  * @param {string} workflowPath - Path to workflow YAML file
  * @returns {Array} Array of action references
@@ -73,21 +93,21 @@ export function extractActionsFromWorkflow(workflowPath) {
     const jobs = workflow?.jobs || {};
 
     for (const [jobName, job] of Object.entries(jobs)) {
+      if (job?.uses) {
+        addParsedAction(actions, job.uses, {
+          workflowFile,
+          jobName
+        });
+      }
+
       const steps = job?.steps || [];
       for (const step of steps) {
         if (step?.uses) {
-          const parsed = parseActionReference(step.uses);
-          if (parsed) {
-            const isFirstParty = shouldExcludeAction(parsed.owner);
-            actions.push({
-              uses: step.uses,
-              ...parsed,
-              workflowFile,
-              jobName,
-              stepName: step.name || 'unnamed step',
-              isFirstParty
-            });
-          }
+          addParsedAction(actions, step.uses, {
+            workflowFile,
+            jobName,
+            stepName: step.name || 'unnamed step'
+          });
         }
       }
     }
