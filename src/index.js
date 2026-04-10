@@ -16,6 +16,7 @@
 import * as core from '@actions/core';
 import { Octokit } from '@octokit/rest';
 import * as fs from 'fs';
+import { minimatch } from 'minimatch';
 import * as path from 'path';
 import YAML from 'yaml';
 
@@ -623,9 +624,22 @@ export async function expandActionReferences(octokit, actions, options) {
 }
 
 /**
+ * Check if a filename matches a pattern (exact match or glob)
+ * @param {string} filename - The filename to test
+ * @param {string} pattern - Exact filename or glob pattern
+ * @returns {boolean} True if the filename matches the pattern
+ */
+export function matchesPattern(filename, pattern) {
+  if (filename === pattern) {
+    return true;
+  }
+  return minimatch(filename, pattern);
+}
+
+/**
  * Get list of workflow files to check
- * @param {string} workflowsInput - Comma-separated workflow files (optional)
- * @param {string} excludeWorkflowsInput - Comma-separated workflows to exclude (optional)
+ * @param {string} workflowsInput - Comma-separated workflow files or glob patterns (optional)
+ * @param {string} excludeWorkflowsInput - Comma-separated workflows or glob patterns to exclude (optional)
  * @param {string} workspaceDir - Workspace directory path
  * @returns {Array<string>} Array of workflow file paths
  */
@@ -637,38 +651,45 @@ export function getWorkflowFiles(workflowsInput, excludeWorkflowsInput, workspac
     return [];
   }
 
+  const allFiles = fs.readdirSync(workflowsDir);
+  const allWorkflowFiles = allFiles.filter(f => f.endsWith('.yml') || f.endsWith('.yaml'));
+
   let workflowFiles = [];
 
   if (workflowsInput) {
-    // Check specific workflows
-    const specified = workflowsInput
+    // Check specific workflows (exact names or glob patterns)
+    const patterns = workflowsInput
       .split(',')
       .map(w => w.trim())
       .filter(Boolean);
-    for (const workflow of specified) {
-      const fullPath = path.join(workflowsDir, workflow);
-      if (fs.existsSync(fullPath)) {
-        workflowFiles.push(fullPath);
-      } else {
-        core.warning(`Specified workflow file not found: ${workflow}`);
+    if (patterns.length === 0) {
+      core.warning(`Invalid workflows input: ${workflowsInput}`);
+      return [];
+    }
+    const matched = new Set();
+    for (const pattern of patterns) {
+      const matches = allWorkflowFiles.filter(f => matchesPattern(f, pattern));
+      if (matches.length === 0) {
+        core.warning(`No workflow files matched: ${pattern}`);
+      }
+      for (const m of matches) {
+        matched.add(m);
       }
     }
+    workflowFiles = [...matched].map(f => path.join(workflowsDir, f));
   } else {
     // Get all workflow files
-    const allFiles = fs.readdirSync(workflowsDir);
-    workflowFiles = allFiles
-      .filter(f => f.endsWith('.yml') || f.endsWith('.yaml'))
-      .map(f => path.join(workflowsDir, f));
+    workflowFiles = allWorkflowFiles.map(f => path.join(workflowsDir, f));
 
-    // Apply exclusions
+    // Apply exclusions (exact names or glob patterns)
     if (excludeWorkflowsInput) {
-      const excludes = excludeWorkflowsInput
+      const excludePatterns = excludeWorkflowsInput
         .split(',')
         .map(w => w.trim())
         .filter(Boolean);
       workflowFiles = workflowFiles.filter(f => {
         const basename = path.basename(f);
-        return !excludes.includes(basename);
+        return !excludePatterns.some(pattern => matchesPattern(basename, pattern));
       });
     }
   }
