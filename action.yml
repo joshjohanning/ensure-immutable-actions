@@ -15,10 +15,10 @@ inputs:
     required: false
     default: 'true'
   workflows:
-    description: 'Specific workflow files to check (comma-separated, e.g., ci.yml,deploy.yml). If not specified, checks ALL workflows in .github/workflows/'
+    description: 'Specific workflow files to check (comma-separated filenames or glob patterns, e.g., ci.yml,deploy-*.yml). If not specified, checks ALL workflows in .github/workflows/'
     required: false
   exclude-workflows:
-    description: 'Workflow files to exclude from checks (comma-separated). Only applies when workflows are not specified'
+    description: 'Workflow files to exclude from checks (comma-separated filenames or glob patterns, e.g., experimental-*.yml). Only applies when workflows are not specified'
     required: false
   include-first-party:
     description: 'Include first-party actions (actions/*, github/*, octokit/*) in immutability checks. When true, first-party actions are also checked and appear in mutable-actions/immutable-actions outputs in addition to first-party-actions.'

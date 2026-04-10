@@ -60,7 +60,8 @@ const {
   checkReleaseImmutability,
   checkAllActions,
   isFullSHA,
-  getActionCacheKey
+  getActionCacheKey,
+  matchesPattern
 } = await import('../src/index.js');
 
 describe('Ensure Immutable Actions', () => {
@@ -545,13 +546,79 @@ runs:
     test('should warn when specified workflow not found', () => {
       const files = getWorkflowFiles('nonexistent.yml', '', testWorkspaceDir);
       expect(files).toHaveLength(0);
-      expect(mockCore.warning).toHaveBeenCalledWith(expect.stringContaining('not found'));
+      expect(mockCore.warning).toHaveBeenCalledWith(expect.stringContaining('No workflow files matched'));
     });
 
     test('should warn when workflows directory not found', () => {
       const files = getWorkflowFiles('', '', '/nonexistent/workspace');
       expect(files).toHaveLength(0);
       expect(mockCore.warning).toHaveBeenCalledWith(expect.stringContaining('not found'));
+    });
+
+    test('should support glob patterns in workflows input', () => {
+      // Add more files for glob testing
+      fs.writeFileSync(path.join(testWorkflowsDir, 'deploy-staging.yml'), 'test');
+      fs.writeFileSync(path.join(testWorkflowsDir, 'deploy-prod.yml'), 'test');
+
+      const files = getWorkflowFiles('deploy-*.yml', '', testWorkspaceDir);
+      expect(files).toHaveLength(2);
+      expect(files.some(f => f.endsWith('deploy-staging.yml'))).toBe(true);
+      expect(files.some(f => f.endsWith('deploy-prod.yml'))).toBe(true);
+      expect(files.some(f => f.endsWith('ci.yml'))).toBe(false);
+    });
+
+    test('should support glob patterns in exclude-workflows input', () => {
+      fs.writeFileSync(path.join(testWorkflowsDir, 'experimental-a.yml'), 'test');
+      fs.writeFileSync(path.join(testWorkflowsDir, 'experimental-b.yml'), 'test');
+
+      const files = getWorkflowFiles('', 'experimental-*.yml', testWorkspaceDir);
+      expect(files).toHaveLength(3);
+      expect(files.some(f => f.endsWith('ci.yml'))).toBe(true);
+      expect(files.some(f => f.endsWith('deploy.yml'))).toBe(true);
+      expect(files.some(f => f.endsWith('test.yaml'))).toBe(true);
+      expect(files.some(f => f.endsWith('experimental-a.yml'))).toBe(false);
+      expect(files.some(f => f.endsWith('experimental-b.yml'))).toBe(false);
+    });
+
+    test('should support mixing exact names and glob patterns', () => {
+      fs.writeFileSync(path.join(testWorkflowsDir, 'deploy-staging.yml'), 'test');
+      fs.writeFileSync(path.join(testWorkflowsDir, 'deploy-prod.yml'), 'test');
+
+      const files = getWorkflowFiles('ci.yml,deploy-*.yml', '', testWorkspaceDir);
+      expect(files).toHaveLength(3);
+      expect(files.some(f => f.endsWith('ci.yml'))).toBe(true);
+      expect(files.some(f => f.endsWith('deploy-staging.yml'))).toBe(true);
+      expect(files.some(f => f.endsWith('deploy-prod.yml'))).toBe(true);
+    });
+
+    test('should warn when glob pattern matches no files', () => {
+      const files = getWorkflowFiles('nonexistent-*.yml', '', testWorkspaceDir);
+      expect(files).toHaveLength(0);
+      expect(mockCore.warning).toHaveBeenCalledWith(expect.stringContaining('No workflow files matched'));
+    });
+
+    test('should not duplicate files when glob and exact match overlap', () => {
+      const files = getWorkflowFiles('ci.yml,*.yml', '', testWorkspaceDir);
+      const ciFiles = files.filter(f => f.endsWith('ci.yml'));
+      expect(ciFiles).toHaveLength(1);
+    });
+  });
+
+  describe('matchesPattern', () => {
+    test('should match exact filenames', () => {
+      expect(matchesPattern('ci.yml', 'ci.yml')).toBe(true);
+      expect(matchesPattern('ci.yml', 'deploy.yml')).toBe(false);
+    });
+
+    test('should match glob patterns with wildcard', () => {
+      expect(matchesPattern('deploy-staging.yml', 'deploy-*.yml')).toBe(true);
+      expect(matchesPattern('deploy-prod.yml', 'deploy-*.yml')).toBe(true);
+      expect(matchesPattern('ci.yml', 'deploy-*.yml')).toBe(false);
+    });
+
+    test('should match glob patterns with question mark', () => {
+      expect(matchesPattern('ci1.yml', 'ci?.yml')).toBe(true);
+      expect(matchesPattern('ci.yml', 'ci?.yml')).toBe(false);
     });
   });
 
