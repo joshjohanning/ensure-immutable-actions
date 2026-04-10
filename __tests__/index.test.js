@@ -602,6 +602,12 @@ runs:
       const ciFiles = files.filter(f => f.endsWith('ci.yml'));
       expect(ciFiles).toHaveLength(1);
     });
+
+    test('should warn and return empty for invalid workflows input', () => {
+      const files = getWorkflowFiles(',, ,', '', testWorkspaceDir);
+      expect(files).toHaveLength(0);
+      expect(mockCore.warning).toHaveBeenCalledWith(expect.stringContaining('Invalid workflows input'));
+    });
   });
 
   describe('matchesPattern', () => {

@@ -662,6 +662,10 @@ export function getWorkflowFiles(workflowsInput, excludeWorkflowsInput, workspac
       .split(',')
       .map(w => w.trim())
       .filter(Boolean);
+    if (patterns.length === 0) {
+      core.warning(`Invalid workflows input: ${workflowsInput}`);
+      return [];
+    }
     const matched = new Set();
     for (const pattern of patterns) {
       const matches = allWorkflowFiles.filter(f => matchesPattern(f, pattern));
