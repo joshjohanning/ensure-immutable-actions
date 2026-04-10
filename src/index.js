@@ -1104,12 +1104,8 @@ export async function run() {
     // Initialize Octokit
     const octokit = new Octokit({ auth: githubToken });
 
-    const skippedFirstPartyActions = includeFirstParty
-      ? []
-      : allActions.filter((action) => action.isFirstParty);
-    const actionsToExpand = includeFirstParty
-      ? allActions
-      : allActions.filter((action) => !action.isFirstParty);
+    const skippedFirstPartyActions = includeFirstParty ? [] : allActions.filter(action => action.isFirstParty);
+    const actionsToExpand = includeFirstParty ? allActions : allActions.filter(action => !action.isFirstParty);
 
     const expandedNonFirstPartyActions = await expandActionReferences(octokit, actionsToExpand, {
       workspaceDir,
