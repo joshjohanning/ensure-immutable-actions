@@ -626,6 +626,11 @@ runs:
       expect(matchesPattern('ci1.yml', 'ci?.yml')).toBe(true);
       expect(matchesPattern('ci.yml', 'ci?.yml')).toBe(false);
     });
+
+    test('should exact-match filenames containing glob metacharacters', () => {
+      expect(matchesPattern('ci[1].yml', 'ci[1].yml')).toBe(true);
+      expect(matchesPattern('ci{a,b}.yml', 'ci{a,b}.yml')).toBe(true);
+    });
   });
 
   describe('isFullSHA', () => {
