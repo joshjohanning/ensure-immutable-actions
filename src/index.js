@@ -1014,10 +1014,10 @@ export async function checkAllActions(octokit, actions, includeFirstParty = fals
         actionPath: action.actionPath || '',
         ref: action.ref,
         workflowFile: action.workflowFile,
-        sourceLocations: action.sourceLocations || [],
         supported: action.supported !== false,
         isFirstParty: action.isFirstParty || false,
-        ...cachedResult
+        ...cachedResult,
+        sourceLocations: action.sourceLocations || []
       };
 
       if (action.supported === false) {
