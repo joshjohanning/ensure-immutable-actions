@@ -597,6 +597,26 @@ runs:
   });
 
   describe('summary source formatting', () => {
+    const savedEnv = {};
+
+    beforeEach(() => {
+      savedEnv.GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY;
+      savedEnv.GITHUB_SHA = process.env.GITHUB_SHA;
+    });
+
+    afterEach(() => {
+      if (savedEnv.GITHUB_REPOSITORY === undefined) {
+        delete process.env.GITHUB_REPOSITORY;
+      } else {
+        process.env.GITHUB_REPOSITORY = savedEnv.GITHUB_REPOSITORY;
+      }
+      if (savedEnv.GITHUB_SHA === undefined) {
+        delete process.env.GITHUB_SHA;
+      } else {
+        process.env.GITHUB_SHA = savedEnv.GITHUB_SHA;
+      }
+    });
+
     test('should format source locations as workflow links when repository context is available', () => {
       expect(
         formatSourceLocationLink(
@@ -1375,21 +1395,7 @@ runs:
       expect(result.some(action => action.uses === 'child-owner/child-action@v3')).toBe(true);
     });
 
-    test('should resolve reusable workflow local paths in the caller workspace', async () => {
-      const workspaceDir = '/tmp/phase4-reusable-local-workspace';
-      const localActionDir = path.join(workspaceDir, '.github', 'actions', 'local-from-workflow');
-      fs.mkdirSync(localActionDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(localActionDir, 'action.yml'),
-        `
-name: Local From Workflow
-runs:
-  using: composite
-  steps:
-    - uses: local-owner/local-action@v4
-`
-      );
-
+    test('should resolve reusable workflow local paths relative to the remote repo', async () => {
       mockOctokit.rest.repos.getContent.mockImplementation(async ({ path: remotePath }) => {
         const files = {
           '.github/workflows/reusable.yml': `
@@ -1401,6 +1407,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: ./.github/actions/local-from-workflow
+`,
+          '.github/actions/local-from-workflow/action.yml': `
+name: Local From Workflow
+runs:
+  using: composite
+  steps:
+    - uses: local-owner/local-action@v4
 `
         };
 
@@ -1433,17 +1446,15 @@ jobs:
       ];
 
       const result = await expandActionReferences(mockOctokit, actions, {
-        workspaceDir,
+        workspaceDir: '/tmp/phase4-reusable-local-workspace',
         expansionCache: new Map(),
         expansionStack: new Set()
       });
 
       expect(result.some(action => action.uses === 'local-owner/local-action@v4')).toBe(true);
-
-      fs.rmSync(workspaceDir, { recursive: true, force: true });
     });
 
-    test('should report remote docker actions as unsupported recursion boundaries', async () => {
+    test('should skip remote docker actions without reporting as unsupported', async () => {
       mockOctokit.rest.repos.getContent.mockImplementation(async ({ path: remotePath }) => {
         const files = {
           'action.yml': `
@@ -1488,14 +1499,7 @@ runs:
         expansionStack: new Set()
       });
 
-      expect(result).toEqual([
-        expect.objectContaining({
-          uses: 'owner/repo@v1',
-          supported: false,
-          unsupportedType: 'remote-recursion',
-          message: 'Unsupported remote action type: docker'
-        })
-      ]);
+      expect(result).toEqual([]);
     });
 
     test('should not report node-based remote actions as unsupported', async () => {

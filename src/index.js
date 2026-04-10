@@ -403,10 +403,10 @@ export function instantiateExpandedAction(template, parentAction) {
     workflowFile: parentAction.workflowFile,
     jobName: template.jobName || parentAction.jobName,
     stepName: template.stepName || parentAction.stepName,
-    entrypointUses: template.entrypointUses || parentAction.entrypointUses || parentAction.uses,
-    sourceWorkflowFile: template.sourceWorkflowFile || parentAction.sourceWorkflowFile || parentAction.workflowFile,
-    sourceJobName: template.sourceJobName || parentAction.sourceJobName || parentAction.jobName,
-    sourceStepName: template.sourceStepName || parentAction.sourceStepName || parentAction.stepName
+    entrypointUses: parentAction.entrypointUses || parentAction.uses,
+    sourceWorkflowFile: parentAction.sourceWorkflowFile || parentAction.workflowFile,
+    sourceJobName: parentAction.sourceJobName || parentAction.jobName,
+    sourceStepName: parentAction.sourceStepName || parentAction.stepName
   };
 }
 
@@ -426,9 +426,14 @@ export async function expandRemoteReusableWorkflow(octokit, action, content, opt
 
     for (const [jobName, job] of Object.entries(jobs)) {
       if (job?.uses) {
+        let nestedUses = job.uses;
+        if (nestedUses.startsWith('./')) {
+          const resolvedPath = path.posix.normalize(nestedUses);
+          nestedUses = `${action.owner}/${action.repo}/${resolvedPath}@${action.ref}`;
+        }
         addParsedAction(
           nestedTemplates,
-          job.uses,
+          nestedUses,
           {
             jobName,
             entrypointUses: action.entrypointUses || action.uses,
@@ -442,9 +447,14 @@ export async function expandRemoteReusableWorkflow(octokit, action, content, opt
 
       for (const step of job?.steps || []) {
         if (step?.uses) {
+          let nestedUses = step.uses;
+          if (nestedUses.startsWith('./')) {
+            const resolvedPath = path.posix.normalize(nestedUses);
+            nestedUses = `${action.owner}/${action.repo}/${resolvedPath}@${action.ref}`;
+          }
           addParsedAction(
             nestedTemplates,
-            step.uses,
+            nestedUses,
             {
               jobName,
               stepName: step.name || 'unnamed step',
@@ -485,7 +495,7 @@ export async function expandRemoteCompositeAction(octokit, action, content, opti
     }
 
     if (actionType === 'docker') {
-      return [createUnsupportedRemoteAction(action, 'Unsupported remote action type: docker')];
+      return [];
     }
 
     if (actionType !== 'composite') {

@@ -163,7 +163,7 @@ jobs:
 > This action always checks immutability against the github.com API since that is the provenance for marketplace actions. It is not designed for use with GHES API URLs.
 
 > [!NOTE]
-> Recursion into remote composite actions and reusable workflows uses the `github-token` to fetch file contents via the GitHub API. The default `GITHUB_TOKEN` only has `contents: read` access to the triggering repository — remote references in private or internal repositories will be silently skipped. To enable full recursion across private repos, provide a token with broader `contents: read` scope, such as a GitHub App token:
+> Recursion into remote composite actions and reusable workflows uses the `github-token` to fetch file contents via the GitHub API. The default `GITHUB_TOKEN` only has `contents: read` access to the triggering repository — remote references in private or internal repositories may not be readable and can be reported as unsupported in the action output/summary. To enable full recursion across private repos, provide a token with broader `contents: read` scope, such as a GitHub App token:
 >
 > ```yaml
 > - uses: actions/create-github-app-token@v2
