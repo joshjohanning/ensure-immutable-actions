@@ -17,6 +17,13 @@ Please refer to the [release page](https://github.com/joshjohanning/ensure-immut
 
 This action scans your workflow files and validates that third-party actions are using [immutable releases](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository#creating-immutable-releases), which prevents supply chain attacks where a release could be modified after you've started using it. First-party actions (`actions/*`, `github/*`, and `octokit/*`) are excluded from checks by default, but can be included via the `include-first-party` input.
 
+The scan covers:
+
+- **Step-level actions** (`steps[].uses`)
+- **Job-level reusable workflows** (`jobs.<id>.uses`)
+- **Local composite actions** — recursively scans nested `uses` references inside composite actions in your repository
+- **Remote composite actions and reusable workflows** — recursively fetches and scans nested `uses` references from external repositories
+
 ## Example Output
 
 The action generates a report organized by workflow, making it easy to identify which workflows need attention:
@@ -86,7 +93,7 @@ jobs:
 
 | Input                 | Description                                                                                                                                                                                                                                    | Required | Default               |
 | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | --------------------- |
-| `github-token`        | GitHub token for API calls                                                                                                                                                                                                                     | Yes      | `${{ github.token }}` |
+| `github-token`        | GitHub token for API calls. The default `github.token` works for public repos. For recursion into private/internal repos, use a PAT or GitHub App token with `contents: read` scope.                                                           | Yes      | `${{ github.token }}` |
 | `fail-on-mutable`     | Fail the workflow if mutable actions are found                                                                                                                                                                                                 | No       | `true`                |
 | `workflows`           | Specific workflow files to check (comma-separated, e.g., `ci.yml,deploy.yml`). **If not specified, checks ALL workflows in `.github/workflows/`.**                                                                                             | No       | All workflows         |
 | `exclude-workflows`   | Workflow files to exclude from checks (comma-separated). Only applies when `workflows` is not specified.                                                                                                                                       | No       | -                     |
@@ -140,19 +147,36 @@ jobs:
 ## How it Works
 
 1. **Scans Workflows**: Reads all workflow files (or specified ones) from `.github/workflows/`
-2. **Extracts Actions**: Parses YAML to find all `uses:` references
-3. **Filters**: Excludes `actions/*`, `github/*`, and `octokit/*` organizations by default (configurable via `include-first-party`)
-4. **Checks Immutability**: For each action not excluded by filters:
+2. **Extracts Actions**: Parses YAML to find all `uses:` references at both the step level and job level (reusable workflows)
+3. **Recurses into Composite Actions**: Follows local and remote composite actions and reusable workflows to find nested third-party action references
+4. **Filters**: Excludes `actions/*`, `github/*`, and `octokit/*` organizations by default (configurable via `include-first-party`)
+5. **Checks Immutability**: For each action not excluded by filters:
    - **Full 40-character SHA references** (e.g., `user/action@abc123...def`) are considered inherently immutable (no API check needed)
    - For tag/branch references, attempts to fetch the release via GitHub API
    - Checks the `immutable` property of the release
    - Reports actions without releases as mutable (e.g., major tags like `v3`, non-immutable SemVer releases, and branch references)
-5. **Reports Unsupported References**: Surfaces unsupported reference types such as local actions and `docker://` references separately from mutable/immutable findings
-6. **Reports Results**: Creates a summary with all findings
-7. **Optionally Fails**: If `fail-on-mutable` is true, fails the workflow when mutable actions are found
+6. **Reports Unsupported References**: Surfaces unsupported reference types such as local actions and `docker://` references separately from mutable/immutable findings
+7. **Reports Results**: Creates a summary with all findings, including the source workflow file for each finding
+8. **Optionally Fails**: If `fail-on-mutable` is true, fails the workflow when mutable actions are found
 
 > [!NOTE]
 > This action always checks immutability against the github.com API since that is the provenance for marketplace actions. It is not designed for use with GHES API URLs.
+
+> [!NOTE]
+> Recursion into remote composite actions and reusable workflows uses the `github-token` to fetch file contents via the GitHub API. The default `GITHUB_TOKEN` only has `contents: read` access to the triggering repository — remote references in private or internal repositories will be silently skipped. To enable full recursion across private repos, provide a token with broader `contents: read` scope, such as a GitHub App token:
+>
+> ```yaml
+> - uses: actions/create-github-app-token@v2
+>   id: app-token
+>   with:
+>     app-id: ${{ vars.APP_ID }}
+>     private-key: ${{ secrets.APP_PRIVATE_KEY }}
+>     owner: ${{ github.repository_owner }}
+>
+> - uses: joshjohanning/ensure-immutable-actions@v2
+>   with:
+>     github-token: ${{ steps.app-token.outputs.token }}
+> ```
 
 ## What's Considered Immutable?
 

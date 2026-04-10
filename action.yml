@@ -7,7 +7,7 @@ branding:
 
 inputs:
   github-token:
-    description: 'GitHub token for API calls'
+    description: 'GitHub token for API calls. The default github.token works for public repos. For recursion into private/internal repos, use a PAT or GitHub App token with contents: read scope.'
     required: true
     default: ${{ github.token }}
   fail-on-mutable:
