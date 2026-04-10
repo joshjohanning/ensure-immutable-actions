@@ -703,9 +703,12 @@ export function formatActionReference(owner, repo, ref, actionPath = '') {
   }
 
   // For tags and branches, create a hyperlink to the repository
-  const url = actionPath
-    ? `https://github.com/${owner}/${repo}/tree/${ref}/${actionPath}`
-    : `https://github.com/${owner}/${repo}/tree/${ref}`;
+  if (actionPath) {
+    const linkType = /\.ya?ml$/.test(actionPath) ? 'blob' : 'tree';
+    const url = `https://github.com/${owner}/${repo}/${linkType}/${ref}/${actionPath}`;
+    return `[${actionRef}](${url})`;
+  }
+  const url = `https://github.com/${owner}/${repo}/tree/${ref}`;
   return `[${actionRef}](${url})`;
 }
 

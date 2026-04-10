@@ -591,7 +591,7 @@ runs:
     test('should include the path for path-based references', () => {
       const result = formatActionReference('owner', 'repo', 'v1', '.github/workflows/reusable.yml');
       expect(result).toBe(
-        '[owner/repo/.github/workflows/reusable.yml@v1](https://github.com/owner/repo/tree/v1/.github/workflows/reusable.yml)'
+        '[owner/repo/.github/workflows/reusable.yml@v1](https://github.com/owner/repo/blob/v1/.github/workflows/reusable.yml)'
       );
     });
   });
