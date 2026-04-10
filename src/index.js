@@ -50,6 +50,34 @@ export function parseActionReference(uses) {
 }
 
 /**
+ * Detect unsupported uses formats so they can be reported instead of silently ignored
+ * @param {string} uses - Raw uses string from a workflow job or step
+ * @returns {Object|null} Unsupported reference details or null when supported/unknown
+ */
+export function getUnsupportedReference(uses) {
+  if (!uses || typeof uses !== 'string') {
+    return null;
+  }
+
+  if (uses.startsWith('./')) {
+    return {
+      unsupportedType: 'local-action',
+      message: 'Unsupported reference type: local action'
+    };
+  }
+
+  if (uses.includes('://')) {
+    const protocol = uses.split('://')[0];
+    return {
+      unsupportedType: 'protocol',
+      message: `Unsupported reference type: ${protocol}://`
+    };
+  }
+
+  return null;
+}
+
+/**
  * Check if an action should be excluded from checks (organizations that already publish immutable releases)
  * @param {string} owner - Action owner
  * @returns {boolean} True if should be excluded
@@ -59,12 +87,23 @@ export function shouldExcludeAction(owner) {
 }
 
 /**
- * Add a parsed action reference to the collection when the uses string is supported
+ * Add a workflow action reference to the collection, including unsupported references
  * @param {Array} actions - Mutable collection of extracted action references
  * @param {string} uses - Raw uses string from a workflow job or step
  * @param {Object} metadata - Additional metadata to attach to the extracted action
  */
 export function addParsedAction(actions, uses, metadata) {
+  const unsupported = getUnsupportedReference(uses);
+  if (unsupported) {
+    actions.push({
+      uses,
+      ...metadata,
+      supported: false,
+      ...unsupported
+    });
+    return;
+  }
+
   const parsed = parseActionReference(uses);
   if (!parsed) {
     return;
@@ -74,6 +113,7 @@ export function addParsedAction(actions, uses, metadata) {
     uses,
     ...parsed,
     ...metadata,
+    supported: true,
     isFirstParty: shouldExcludeAction(parsed.owner)
   });
 }
@@ -267,22 +307,39 @@ export async function checkReleaseImmutability(octokit, owner, repo, ref) {
  * @param {Octokit} octokit - Octokit instance
  * @param {Array} actions - Array of action references
  * @param {boolean} includeFirstParty - Whether to include first-party actions in checks
- * @returns {Promise<Object>} { mutable: Array, immutable: Array, firstParty: Array, byWorkflow: Object }
+ * @returns {Promise<Object>} { mutable: Array, immutable: Array, unsupported: Array, firstParty: Array, byWorkflow: Object }
  */
 export async function checkAllActions(octokit, actions, includeFirstParty = false) {
   const mutable = [];
   const immutable = [];
+  const unsupported = [];
   const firstParty = [];
   const byWorkflow = {};
 
+  const unsupportedActions = actions.filter(a => a.supported === false);
+
   // Separate first-party actions from actions to check
   // When includeFirstParty is true, check all actions for immutability
-  const actionsToCheck = includeFirstParty ? actions : actions.filter(a => !a.isFirstParty);
-  const excludedFirstPartyActions = includeFirstParty ? [] : actions.filter(a => a.isFirstParty);
-  const allFirstPartyActions = actions.filter(a => a.isFirstParty);
+  const supportedActions = actions.filter(a => a.supported !== false);
+  const actionsToCheck = includeFirstParty ? supportedActions : supportedActions.filter(a => !a.isFirstParty);
+  const excludedFirstPartyActions = includeFirstParty ? [] : supportedActions.filter(a => a.isFirstParty);
+  const allFirstPartyActions = supportedActions.filter(a => a.isFirstParty);
 
   // Create a cache for immutability results
   const immutabilityCache = new Map();
+
+  // Process unsupported actions - deduplicate by uses string
+  const uniqueUnsupportedActions = Array.from(new Map(unsupportedActions.map(a => [a.uses, a])).values());
+  for (const action of uniqueUnsupportedActions) {
+    const actionInfo = {
+      uses: action.uses,
+      supported: false,
+      unsupportedType: action.unsupportedType,
+      message: action.message
+    };
+    unsupported.push(actionInfo);
+    immutabilityCache.set(action.uses, actionInfo);
+  }
 
   // Process excluded first-party actions (no API check needed) - deduplicate by uses string
   const uniqueExcludedFirstParty = Array.from(new Map(excludedFirstPartyActions.map(a => [a.uses, a])).values());
@@ -365,7 +422,7 @@ export async function checkAllActions(octokit, actions, includeFirstParty = fals
 
   // Then, deduplicate within each workflow and categorize
   for (const [workflowFile, workflowActions] of Object.entries(actionsByWorkflow)) {
-    byWorkflow[workflowFile] = { mutable: [], immutable: [], firstParty: [] };
+    byWorkflow[workflowFile] = { mutable: [], immutable: [], unsupported: [], firstParty: [] };
 
     // Deduplicate by uses string within this workflow
     const uniqueWorkflowActions = Array.from(new Map(workflowActions.map(a => [a.uses, a])).values());
@@ -378,11 +435,14 @@ export async function checkAllActions(octokit, actions, includeFirstParty = fals
         repo: action.repo,
         ref: action.ref,
         workflowFile: action.workflowFile,
+        supported: action.supported !== false,
         isFirstParty: action.isFirstParty || false,
         ...cachedResult
       };
 
-      if (!includeFirstParty && action.isFirstParty) {
+      if (action.supported === false) {
+        byWorkflow[workflowFile].unsupported.push(actionInfo);
+      } else if (!includeFirstParty && action.isFirstParty) {
         byWorkflow[workflowFile].firstParty.push(actionInfo);
       } else if (cachedResult.immutable) {
         byWorkflow[workflowFile].immutable.push(actionInfo);
@@ -392,7 +452,7 @@ export async function checkAllActions(octokit, actions, includeFirstParty = fals
     }
   }
 
-  return { mutable, immutable, firstParty, byWorkflow };
+  return { mutable, immutable, unsupported, firstParty, byWorkflow };
 }
 
 /**
@@ -429,6 +489,7 @@ export async function run() {
       core.setOutput('workflows-checked', '[]');
       core.setOutput('mutable-actions', '[]');
       core.setOutput('immutable-actions', '[]');
+      core.setOutput('unsupported-actions', '[]');
       return;
     }
 
@@ -452,6 +513,7 @@ export async function run() {
       core.setOutput('workflows-checked', JSON.stringify(workflowBasenames));
       core.setOutput('mutable-actions', '[]');
       core.setOutput('immutable-actions', '[]');
+      core.setOutput('unsupported-actions', '[]');
       core.setOutput('first-party-actions', '[]');
 
       // Create summary
@@ -467,13 +529,13 @@ export async function run() {
       return;
     }
 
-    core.info(`Total actions to check: ${allActions.length}`);
+    core.info(`Total action references found: ${allActions.length}`);
 
     // Initialize Octokit
     const octokit = new Octokit({ auth: githubToken });
 
     // Check all actions
-    const { mutable, immutable, firstParty, byWorkflow } = await checkAllActions(
+    const { mutable, immutable, unsupported, firstParty, byWorkflow } = await checkAllActions(
       octokit,
       allActions,
       includeFirstParty
@@ -483,14 +545,15 @@ export async function run() {
     core.setOutput('workflows-checked', JSON.stringify(workflowBasenames));
     core.setOutput('mutable-actions', JSON.stringify(mutable));
     core.setOutput('immutable-actions', JSON.stringify(immutable));
+    core.setOutput('unsupported-actions', JSON.stringify(unsupported));
     core.setOutput('first-party-actions', JSON.stringify(firstParty));
-    core.setOutput('all-passed', mutable.length === 0);
+    core.setOutput('all-passed', mutable.length === 0 && unsupported.length === 0);
 
     // Create summary with separate tables per workflow
     try {
       let summary = core.summary;
 
-      if (mutable.length === 0) {
+      if (mutable.length === 0 && unsupported.length === 0) {
         summary = summary.addRaw('# ✅ Immutable Actions Check - All Passed\n\n');
       } else {
         summary = summary.addRaw('# ❌ Immutable Actions Check - Failed\n\n');
@@ -500,7 +563,9 @@ export async function run() {
 
       summary = summary
         .addRaw(`**Workflows Checked:** ${workflowBasenames.join(', ')}\n\n`)
-        .addRaw(`**Summary:** ${excludedCount} excluded, ${immutable.length} immutable, ${mutable.length} mutable\n\n`);
+        .addRaw(
+          `**Summary:** ${excludedCount} excluded, ${immutable.length} immutable, ${mutable.length} mutable, ${unsupported.length} unsupported\n\n`
+        );
 
       // Add a table for each workflow
       for (const workflowFile of workflowBasenames) {
@@ -510,6 +575,7 @@ export async function run() {
           !workflowData ||
           (workflowData.immutable.length === 0 &&
             workflowData.mutable.length === 0 &&
+            workflowData.unsupported.length === 0 &&
             workflowData.firstParty.length === 0)
         ) {
           continue;
@@ -517,12 +583,13 @@ export async function run() {
 
         const workflowMutableCount = workflowData.mutable.length;
         const workflowImmutableCount = workflowData.immutable.length;
+        const workflowUnsupportedCount = workflowData.unsupported.length;
         const workflowFirstPartyCount = workflowData.firstParty.length;
-        const workflowStatus = workflowMutableCount === 0 ? '✅' : '❌';
+        const workflowStatus = workflowMutableCount === 0 && workflowUnsupportedCount === 0 ? '✅' : '❌';
 
         summary = summary.addRaw(`### ${workflowStatus} ${workflowFile}\n\n`);
         summary = summary.addRaw(
-          `**Actions:** ${workflowFirstPartyCount} excluded, ${workflowImmutableCount} immutable, ${workflowMutableCount} mutable\n\n`
+          `**Actions:** ${workflowFirstPartyCount} excluded, ${workflowImmutableCount} immutable, ${workflowMutableCount} mutable, ${workflowUnsupportedCount} unsupported\n\n`
         );
 
         // Build markdown table
@@ -542,6 +609,9 @@ export async function run() {
           const actionRef = formatActionReference(action.owner, action.repo, action.ref);
           markdownTable += `| ${actionRef} | ❌ Mutable | ${action.message} |\n`;
         }
+        for (const action of workflowData.unsupported) {
+          markdownTable += `| ${action.uses} | ⚠️ Unsupported | ${action.message} |\n`;
+        }
 
         summary = summary.addRaw(markdownTable).addRaw('\n');
       }
@@ -554,6 +624,7 @@ export async function run() {
       core.info(`   First-party: ${firstParty.length}`);
       core.info(`   Immutable: ${immutable.length}`);
       core.info(`   Mutable: ${mutable.length}`);
+      core.info(`   Unsupported: ${unsupported.length}`);
     }
 
     // Log results
@@ -571,13 +642,20 @@ export async function run() {
       }
     }
 
+    if (unsupported.length > 0) {
+      core.warning(`Found ${unsupported.length} unsupported action reference(s):`);
+      for (const action of unsupported) {
+        core.warning(`${action.uses} (${action.message})`);
+      }
+    }
+
     // Fail if needed
     if (failOnMutable && mutable.length > 0) {
       core.setFailed(
         `Found ${mutable.length} action(s) using mutable releases. ` +
           `Please use immutable releases for supply chain security.`
       );
-    } else if (mutable.length === 0) {
+    } else if (mutable.length === 0 && unsupported.length === 0) {
       core.info('\n✅ All actions are using immutable releases!');
     }
   } catch (error) {

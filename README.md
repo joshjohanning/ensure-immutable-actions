@@ -94,13 +94,14 @@ jobs:
 
 ## Outputs
 
-| Output                | Description                                                                                        |
-| --------------------- | -------------------------------------------------------------------------------------------------- |
-| `mutable-actions`     | JSON array of actions using mutable releases                                                       |
-| `immutable-actions`   | JSON array of actions using immutable releases                                                     |
-| `first-party-actions` | JSON array of all first-party actions with `allowed` and `message` fields indicating their status. |
-| `all-passed`          | Boolean indicating if all checks passed                                                            |
-| `workflows-checked`   | List of workflow files that were checked                                                           |
+| Output                | Description                                                                                                  |
+| --------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `mutable-actions`     | JSON array of actions using mutable releases                                                                 |
+| `immutable-actions`   | JSON array of actions using immutable releases                                                               |
+| `unsupported-actions` | JSON array of action references that were found but not analyzed because their reference type is unsupported |
+| `first-party-actions` | JSON array of all first-party actions with `allowed` and `message` fields indicating their status.           |
+| `all-passed`          | Boolean indicating if all checks passed                                                                      |
+| `workflows-checked`   | List of workflow files that were checked                                                                     |
 
 ## Examples
 
@@ -146,8 +147,9 @@ jobs:
    - For tag/branch references, attempts to fetch the release via GitHub API
    - Checks the `immutable` property of the release
    - Reports actions without releases as mutable (e.g., major tags like `v3`, non-immutable SemVer releases, and branch references)
-5. **Reports Results**: Creates a summary with all findings
-6. **Optionally Fails**: If `fail-on-mutable` is true, fails the workflow when mutable actions are found
+5. **Reports Unsupported References**: Surfaces unsupported reference types such as local actions and `docker://` references separately from mutable/immutable findings
+6. **Reports Results**: Creates a summary with all findings
+7. **Optionally Fails**: If `fail-on-mutable` is true, fails the workflow when mutable actions are found
 
 > [!NOTE]
 > This action always checks immutability against the github.com API since that is the provenance for marketplace actions. It is not designed for use with GHES API URLs.

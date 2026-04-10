@@ -45,6 +45,7 @@ const {
   parseActionReference,
   shouldExcludeAction,
   extractActionsFromWorkflow,
+  getUnsupportedReference,
   getWorkflowFiles,
   checkReleaseImmutability,
   checkAllActions,
@@ -119,6 +120,26 @@ describe('Ensure Immutable Actions', () => {
       expect(parseActionReference('no-at-sign')).toBeNull();
       expect(parseActionReference('')).toBeNull();
       expect(parseActionReference(null)).toBeNull();
+    });
+  });
+
+  describe('getUnsupportedReference', () => {
+    test('should detect local actions as unsupported', () => {
+      expect(getUnsupportedReference('./local-action')).toEqual({
+        unsupportedType: 'local-action',
+        message: 'Unsupported reference type: local action'
+      });
+    });
+
+    test('should detect protocol-based references as unsupported', () => {
+      expect(getUnsupportedReference('docker://alpine:3.8')).toEqual({
+        unsupportedType: 'protocol',
+        message: 'Unsupported reference type: docker://'
+      });
+    });
+
+    test('should return null for supported references', () => {
+      expect(getUnsupportedReference('actions/checkout@v4')).toBeNull();
     });
   });
 
@@ -254,7 +275,7 @@ jobs:
       expect(mockCore.warning).toHaveBeenCalled();
     });
 
-    test('should skip local and docker actions', () => {
+    test('should include unsupported local and docker actions in extraction results', () => {
       const workflowContent = `
 name: CI
 on: push
@@ -271,8 +292,21 @@ jobs:
       fs.writeFileSync(tempFile, workflowContent);
 
       const actions = extractActionsFromWorkflow(tempFile);
-      expect(actions).toHaveLength(1);
-      expect(actions[0].owner).toBe('third-party');
+      expect(actions).toHaveLength(3);
+      expect(actions[0]).toMatchObject({
+        uses: './local-action',
+        supported: false,
+        unsupportedType: 'local-action',
+        message: 'Unsupported reference type: local action'
+      });
+      expect(actions[1]).toMatchObject({
+        uses: 'docker://alpine:3.8',
+        supported: false,
+        unsupportedType: 'protocol',
+        message: 'Unsupported reference type: docker://'
+      });
+      expect(actions[2].owner).toBe('third-party');
+      expect(actions[2].supported).toBe(true);
 
       fs.unlinkSync(tempFile);
     });
@@ -775,6 +809,47 @@ jobs:
       expect(result.mutable[0].owner).toBe('actions');
       expect(result.byWorkflow['ci.yml'].mutable).toHaveLength(1);
     });
+
+    test('should report unsupported references separately', async () => {
+      const actions = [
+        {
+          uses: './local-action',
+          supported: false,
+          unsupportedType: 'local-action',
+          message: 'Unsupported reference type: local action',
+          workflowFile: 'workflow1.yml'
+        },
+        {
+          uses: 'docker://alpine:3.8',
+          supported: false,
+          unsupportedType: 'protocol',
+          message: 'Unsupported reference type: docker://',
+          workflowFile: 'workflow1.yml'
+        },
+        {
+          uses: 'owner/repo@v1',
+          owner: 'owner',
+          repo: 'repo',
+          ref: 'v1',
+          supported: true,
+          workflowFile: 'workflow1.yml',
+          isFirstParty: false
+        }
+      ];
+
+      mockOctokit.rest.repos.getReleaseByTag.mockResolvedValue({
+        data: { immutable: true }
+      });
+
+      const result = await checkAllActions(mockOctokit, actions);
+
+      expect(result.unsupported).toHaveLength(2);
+      expect(result.unsupported[0].uses).toBe('./local-action');
+      expect(result.unsupported[1].uses).toBe('docker://alpine:3.8');
+      expect(result.immutable).toHaveLength(1);
+      expect(result.mutable).toHaveLength(0);
+      expect(result.byWorkflow['workflow1.yml'].unsupported).toHaveLength(2);
+    });
   });
 
   describe('Action execution', () => {
@@ -909,6 +984,30 @@ jobs:
       // Should now process first-party actions
       expect(mockCore.info).not.toHaveBeenCalledWith(expect.stringContaining('No third-party actions found'));
       expect(mockCore.setOutput).toHaveBeenCalledWith('all-passed', true);
+    });
+
+    test('should report unsupported references without failing on mutable-only policy', async () => {
+      const workflowContent = `
+name: CI
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./local-action
+      - uses: docker://alpine:3.8
+      - uses: owner/repo@1234567890abcdef1234567890abcdef12345678
+`;
+      fs.writeFileSync(path.join(testWorkflowsDir, 'ci.yml'), workflowContent);
+
+      await run();
+
+      expect(mockCore.setOutput).toHaveBeenCalledWith('all-passed', false);
+      const unsupportedCall = mockCore.setOutput.mock.calls.find(c => c[0] === 'unsupported-actions');
+      const unsupportedOutput = JSON.parse(unsupportedCall[1]);
+      expect(unsupportedOutput).toHaveLength(2);
+      expect(mockCore.setFailed).not.toHaveBeenCalled();
+      expect(mockCore.warning).toHaveBeenCalledWith(expect.stringContaining('unsupported action reference'));
     });
 
     test('should check first-party actions when include-first-party is true', async () => {
