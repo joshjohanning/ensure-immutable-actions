@@ -28,7 +28,8 @@ const mockCore = {
 const mockOctokit = {
   rest: {
     repos: {
-      getReleaseByTag: jest.fn()
+      getReleaseByTag: jest.fn(),
+      getContent: jest.fn()
     }
   }
 };
@@ -45,12 +46,21 @@ const {
   parseActionReference,
   shouldExcludeAction,
   extractActionsFromWorkflow,
+  expandActionReferences,
+  expandRemoteReference,
+  fetchRemoteFile,
+  findLocalActionMetadataFile,
+  formatActionReference,
+  formatSourceLocationLink,
+  formatSummaryMessage,
+  formatTraversalHint,
   getUnsupportedReference,
   getWorkflowFiles,
+  isReusableWorkflowReference,
   checkReleaseImmutability,
   checkAllActions,
   isFullSHA,
-  formatActionReference
+  getActionCacheKey
 } = await import('../src/index.js');
 
 describe('Ensure Immutable Actions', () => {
@@ -59,6 +69,7 @@ describe('Ensure Immutable Actions', () => {
 
     // Reset Octokit mock
     mockOctokit.rest.repos.getReleaseByTag.mockClear();
+    mockOctokit.rest.repos.getContent.mockClear();
 
     // Set default inputs
     mockCore.getBooleanInput.mockImplementation(name => {
@@ -82,6 +93,7 @@ describe('Ensure Immutable Actions', () => {
       expect(result).toEqual({
         owner: 'actions',
         repo: 'checkout',
+        actionPath: '',
         ref: 'v4'
       });
     });
@@ -91,6 +103,7 @@ describe('Ensure Immutable Actions', () => {
       expect(result).toEqual({
         owner: 'owner',
         repo: 'repo',
+        actionPath: 'path',
         ref: 'v1'
       });
     });
@@ -101,6 +114,7 @@ describe('Ensure Immutable Actions', () => {
       expect(result).toEqual({
         owner: 'actions',
         repo: 'checkout',
+        actionPath: '',
         ref: '1234567890abcdef1234567890abcdef12345678'
       });
     });
@@ -124,13 +138,6 @@ describe('Ensure Immutable Actions', () => {
   });
 
   describe('getUnsupportedReference', () => {
-    test('should detect local actions as unsupported', () => {
-      expect(getUnsupportedReference('./local-action')).toEqual({
-        unsupportedType: 'local-action',
-        message: 'Unsupported reference type: local action'
-      });
-    });
-
     test('should detect protocol-based references as unsupported', () => {
       expect(getUnsupportedReference('docker://alpine:3.8')).toEqual({
         unsupportedType: 'protocol',
@@ -140,6 +147,51 @@ describe('Ensure Immutable Actions', () => {
 
     test('should return null for supported references', () => {
       expect(getUnsupportedReference('actions/checkout@v4')).toBeNull();
+      expect(getUnsupportedReference('./local-action')).toBeNull();
+    });
+  });
+
+  describe('findLocalActionMetadataFile', () => {
+    test('should find action metadata file in local action directory', () => {
+      const actionDir = '/tmp/test-local-action-metadata';
+      fs.mkdirSync(actionDir, { recursive: true });
+      fs.writeFileSync(path.join(actionDir, 'action.yml'), 'name: Test');
+
+      const metadataFile = findLocalActionMetadataFile(actionDir);
+      expect(metadataFile).toBe(path.join(actionDir, 'action.yml'));
+
+      fs.rmSync(actionDir, { recursive: true, force: true });
+    });
+  });
+
+  describe('isReusableWorkflowReference', () => {
+    test('should detect reusable workflow paths', () => {
+      expect(
+        isReusableWorkflowReference({
+          actionPath: '.github/workflows/reusable.yml'
+        })
+      ).toBe(true);
+    });
+
+    test('should not treat normal action paths as reusable workflows', () => {
+      expect(
+        isReusableWorkflowReference({
+          actionPath: 'path/to/action'
+        })
+      ).toBe(false);
+    });
+  });
+
+  describe('getActionCacheKey', () => {
+    test('should distinguish supported and unsupported records', () => {
+      expect(getActionCacheKey({ uses: 'owner/repo@v1', supported: true })).toBe('supported:owner/repo@v1');
+      expect(
+        getActionCacheKey({
+          uses: 'owner/repo@v1',
+          supported: false,
+          message: 'Unsupported remote action type: docker'
+        })
+      ).toBe('unsupported:owner/repo@v1:Unsupported remote action type: docker');
     });
   });
 
@@ -275,7 +327,14 @@ jobs:
       expect(mockCore.warning).toHaveBeenCalled();
     });
 
-    test('should include unsupported local and docker actions in extraction results', () => {
+    test('should recurse into local composite actions and keep docker references unsupported', () => {
+      const workspaceDir = '/tmp/test-workflow-local-composite';
+      const workflowsDir = path.join(workspaceDir, '.github', 'workflows');
+      const localActionDir = path.join(workspaceDir, '.github', 'actions', 'composite');
+
+      fs.mkdirSync(workflowsDir, { recursive: true });
+      fs.mkdirSync(localActionDir, { recursive: true });
+
       const workflowContent = `
 name: CI
 on: push
@@ -283,32 +342,156 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: ./local-action
+      - uses: ./.github/actions/composite
       - uses: docker://alpine:3.8
       - uses: third-party/action@v1
 `;
+      const actionContent = `
+name: Composite
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v4
+    - uses: nested-owner/nested-action@v2
+`;
 
-      const tempFile = '/tmp/test-workflow-mixed.yml';
+      const tempFile = path.join(workflowsDir, 'ci.yml');
       fs.writeFileSync(tempFile, workflowContent);
+      fs.writeFileSync(path.join(localActionDir, 'action.yml'), actionContent);
 
-      const actions = extractActionsFromWorkflow(tempFile);
-      expect(actions).toHaveLength(3);
+      const actions = extractActionsFromWorkflow(tempFile, workspaceDir);
+      expect(actions).toHaveLength(4);
       expect(actions[0]).toMatchObject({
-        uses: './local-action',
-        supported: false,
-        unsupportedType: 'local-action',
-        message: 'Unsupported reference type: local action'
+        uses: 'actions/checkout@v4',
+        supported: true,
+        owner: 'actions',
+        repo: 'checkout',
+        ref: 'v4'
       });
       expect(actions[1]).toMatchObject({
+        uses: 'nested-owner/nested-action@v2',
+        supported: true,
+        owner: 'nested-owner',
+        repo: 'nested-action',
+        ref: 'v2'
+      });
+      expect(actions[2]).toMatchObject({
         uses: 'docker://alpine:3.8',
         supported: false,
         unsupportedType: 'protocol',
         message: 'Unsupported reference type: docker://'
       });
-      expect(actions[2].owner).toBe('third-party');
-      expect(actions[2].supported).toBe(true);
+      expect(actions[3]).toMatchObject({
+        uses: 'third-party/action@v1',
+        supported: true,
+        owner: 'third-party',
+        repo: 'action',
+        ref: 'v1'
+      });
 
-      fs.unlinkSync(tempFile);
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+    });
+
+    test('should recurse into nested local composite actions', () => {
+      const workspaceDir = '/tmp/test-workflow-nested-local-composite';
+      const workflowsDir = path.join(workspaceDir, '.github', 'workflows');
+      const parentActionDir = path.join(workspaceDir, '.github', 'actions', 'parent');
+      const childActionDir = path.join(parentActionDir, 'child');
+
+      fs.mkdirSync(workflowsDir, { recursive: true });
+      fs.mkdirSync(childActionDir, { recursive: true });
+
+      fs.writeFileSync(
+        path.join(workflowsDir, 'ci.yml'),
+        `
+name: CI
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./.github/actions/parent
+`
+      );
+
+      fs.writeFileSync(
+        path.join(parentActionDir, 'action.yml'),
+        `
+name: Parent
+runs:
+  using: composite
+  steps:
+    - uses: ./child
+`
+      );
+
+      fs.writeFileSync(
+        path.join(childActionDir, 'action.yml'),
+        `
+name: Child
+runs:
+  using: composite
+  steps:
+    - uses: child-owner/child-action@v3
+`
+      );
+
+      const actions = extractActionsFromWorkflow(path.join(workflowsDir, 'ci.yml'), workspaceDir);
+
+      expect(actions).toHaveLength(1);
+      expect(actions[0]).toMatchObject({
+        uses: 'child-owner/child-action@v3',
+        supported: true,
+        owner: 'child-owner',
+        repo: 'child-action',
+        ref: 'v3'
+      });
+
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+    });
+
+    test('should keep non-composite local actions unsupported', () => {
+      const workspaceDir = '/tmp/test-workflow-local-javascript-action';
+      const workflowsDir = path.join(workspaceDir, '.github', 'workflows');
+      const localActionDir = path.join(workspaceDir, '.github', 'actions', 'javascript');
+
+      fs.mkdirSync(workflowsDir, { recursive: true });
+      fs.mkdirSync(localActionDir, { recursive: true });
+
+      fs.writeFileSync(
+        path.join(workflowsDir, 'ci.yml'),
+        `
+name: CI
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./.github/actions/javascript
+`
+      );
+
+      fs.writeFileSync(
+        path.join(localActionDir, 'action.yml'),
+        `
+name: JavaScript Action
+runs:
+  using: node24
+  main: index.js
+`
+      );
+
+      const actions = extractActionsFromWorkflow(path.join(workflowsDir, 'ci.yml'), workspaceDir);
+
+      expect(actions).toHaveLength(1);
+      expect(actions[0]).toMatchObject({
+        uses: './.github/actions/javascript',
+        supported: false,
+        unsupportedType: 'local-action',
+        message: 'Unsupported local action type: node24'
+      });
+
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
     });
   });
 
@@ -403,6 +586,114 @@ jobs:
     test('should add hyperlink for branch references', () => {
       const result = formatActionReference('owner', 'repo', 'main');
       expect(result).toBe('[owner/repo@main](https://github.com/owner/repo/tree/main)');
+    });
+
+    test('should include the path for path-based references', () => {
+      const result = formatActionReference('owner', 'repo', 'v1', '.github/workflows/reusable.yml');
+      expect(result).toBe(
+        '[owner/repo/.github/workflows/reusable.yml@v1](https://github.com/owner/repo/blob/v1/.github/workflows/reusable.yml)'
+      );
+    });
+  });
+
+  describe('summary source formatting', () => {
+    const savedEnv = {};
+
+    beforeEach(() => {
+      savedEnv.GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY;
+      savedEnv.GITHUB_SHA = process.env.GITHUB_SHA;
+    });
+
+    afterEach(() => {
+      if (savedEnv.GITHUB_REPOSITORY === undefined) {
+        delete process.env.GITHUB_REPOSITORY;
+      } else {
+        process.env.GITHUB_REPOSITORY = savedEnv.GITHUB_REPOSITORY;
+      }
+      if (savedEnv.GITHUB_SHA === undefined) {
+        delete process.env.GITHUB_SHA;
+      } else {
+        process.env.GITHUB_SHA = savedEnv.GITHUB_SHA;
+      }
+    });
+
+    test('should format source locations as workflow links when repository context is available', () => {
+      expect(
+        formatSourceLocationLink(
+          {
+            workflowFile: 'targets-mutable.yml',
+            jobName: 'test',
+            stepName: 'Check npm version'
+          },
+          'Wuodan/ensure-immutable-actions-test',
+          '1234567890abcdef1234567890abcdef12345678'
+        )
+      ).toBe(
+        '[targets-mutable.yml](https://github.com/Wuodan/ensure-immutable-actions-test/blob/1234567890abcdef1234567890abcdef12345678/.github/workflows/targets-mutable.yml)'
+      );
+    });
+
+    test('should append linked source locations to summary messages', () => {
+      process.env.GITHUB_REPOSITORY = 'Wuodan/ensure-immutable-actions-test';
+      process.env.GITHUB_SHA = '1234567890abcdef1234567890abcdef12345678';
+
+      expect(
+        formatSummaryMessage(
+          'No release found for this reference',
+          [{ workflowFile: 'targets-mutable.yml', jobName: 'test', stepName: 'Check npm version' }],
+          true
+        )
+      ).toBe(
+        'No release found for this reference<br>- [targets-mutable.yml](https://github.com/Wuodan/ensure-immutable-actions-test/blob/1234567890abcdef1234567890abcdef12345678/.github/workflows/targets-mutable.yml)'
+      );
+    });
+
+    test('should deduplicate identical workflow links in summary messages', () => {
+      process.env.GITHUB_REPOSITORY = 'Wuodan/ensure-immutable-actions-test';
+      process.env.GITHUB_SHA = '1234567890abcdef1234567890abcdef12345678';
+
+      expect(
+        formatSummaryMessage(
+          'No release found for this reference',
+          [
+            { workflowFile: 'targets-mutable.yml', jobName: 'job-a', stepName: 'step-a' },
+            { workflowFile: 'targets-mutable.yml', jobName: 'job-b', stepName: 'step-b' }
+          ],
+          true
+        )
+      ).toBe(
+        'No release found for this reference<br>- [targets-mutable.yml](https://github.com/Wuodan/ensure-immutable-actions-test/blob/1234567890abcdef1234567890abcdef12345678/.github/workflows/targets-mutable.yml)'
+      );
+    });
+
+    test('should format a traversal hint for recursive mutable findings', () => {
+      expect(
+        formatTraversalHint({
+          uses: 'owner/nested-action@main',
+          entrypointUses: 'owner/repo/.github/workflows/reusable.yml@main',
+          sourceWorkflowFile: 'targets-mutable.yml',
+          sourceJobName: 'remote-reusable',
+          sourceStepName: 'unnamed step'
+        })
+      ).toBe('owner/nested-action@main reached via targets-mutable.yml');
+    });
+  });
+
+  describe('fetchRemoteFile', () => {
+    test('should decode base64 file content', async () => {
+      mockOctokit.rest.repos.getContent.mockResolvedValue({
+        data: {
+          type: 'file',
+          encoding: 'base64',
+          content: Buffer.from('name: test', 'utf8').toString('base64')
+        }
+      });
+
+      const result = await fetchRemoteFile(mockOctokit, 'owner', 'repo', 'action.yml', 'v1');
+      expect(result).toEqual({
+        found: true,
+        content: 'name: test'
+      });
     });
   });
 
@@ -690,6 +981,57 @@ jobs:
       expect(result.byWorkflow['workflow1.yml'].immutable[0].uses).toBe('owner/repo@v1');
     });
 
+    test('should preserve all caller-side source locations when deduplicating within a workflow', async () => {
+      const actions = [
+        {
+          uses: 'owner/repo@v1',
+          owner: 'owner',
+          repo: 'repo',
+          ref: 'v1',
+          workflowFile: 'workflow1.yml',
+          jobName: 'lint',
+          stepName: 'First use',
+          sourceWorkflowFile: 'workflow1.yml',
+          sourceJobName: 'lint',
+          sourceStepName: 'First use',
+          isFirstParty: false
+        },
+        {
+          uses: 'owner/repo@v1',
+          owner: 'owner',
+          repo: 'repo',
+          ref: 'v1',
+          workflowFile: 'workflow1.yml',
+          jobName: 'test',
+          stepName: 'Second use',
+          sourceWorkflowFile: 'workflow1.yml',
+          sourceJobName: 'test',
+          sourceStepName: 'Second use',
+          isFirstParty: false
+        }
+      ];
+
+      mockOctokit.rest.repos.getReleaseByTag.mockResolvedValue({
+        data: { immutable: true }
+      });
+
+      const result = await checkAllActions(mockOctokit, actions);
+
+      expect(result.byWorkflow['workflow1.yml'].immutable).toHaveLength(1);
+      expect(result.byWorkflow['workflow1.yml'].immutable[0].sourceLocations).toEqual([
+        {
+          workflowFile: 'workflow1.yml',
+          jobName: 'lint',
+          stepName: 'First use'
+        },
+        {
+          workflowFile: 'workflow1.yml',
+          jobName: 'test',
+          stepName: 'Second use'
+        }
+      ]);
+    });
+
     test('should deduplicate first-party actions within a workflow', async () => {
       const actions = [
         {
@@ -852,6 +1194,363 @@ jobs:
     });
   });
 
+  describe('expandActionReferences', () => {
+    test('should recurse into remote composite actions', async () => {
+      mockOctokit.rest.repos.getContent.mockImplementation(async ({ path: remotePath }) => {
+        const files = {
+          'path/to/action/action.yml': `
+name: Remote Composite
+runs:
+  using: composite
+  steps:
+    - uses: owner/nested-action@v2
+`,
+          'action.yml': `
+name: Nested Action
+runs:
+  using: node24
+  main: index.js
+`
+        };
+
+        if (!files[remotePath]) {
+          const error = new Error('Not Found');
+          error.status = 404;
+          throw error;
+        }
+
+        return {
+          data: {
+            type: 'file',
+            encoding: 'base64',
+            content: Buffer.from(files[remotePath], 'utf8').toString('base64')
+          }
+        };
+      });
+
+      const actions = [
+        {
+          uses: 'owner/repo/path/to/action@v1',
+          owner: 'owner',
+          repo: 'repo',
+          actionPath: 'path/to/action',
+          ref: 'v1',
+          workflowFile: 'ci.yml',
+          supported: true,
+          isFirstParty: false
+        }
+      ];
+
+      const result = await expandActionReferences(mockOctokit, actions, {
+        workspaceDir: '/tmp/workspace',
+        expansionCache: new Map(),
+        expansionStack: new Set()
+      });
+
+      expect(result).toHaveLength(2);
+      expect(result[1]).toMatchObject({
+        uses: 'owner/nested-action@v2',
+        owner: 'owner',
+        repo: 'nested-action',
+        actionPath: '',
+        ref: 'v2',
+        workflowFile: 'ci.yml',
+        supported: true
+      });
+    });
+
+    test('should recurse into remote reusable workflows', async () => {
+      mockOctokit.rest.repos.getContent.mockImplementation(async ({ path: remotePath }) => {
+        const files = {
+          '.github/workflows/reusable.yml': `
+name: Reusable
+on:
+  workflow_call:
+jobs:
+  nested:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: owner/nested-action@v2
+`,
+          'action.yml': `
+name: Nested Action
+runs:
+  using: node24
+  main: index.js
+`
+        };
+
+        if (!files[remotePath]) {
+          const error = new Error('Not Found');
+          error.status = 404;
+          throw error;
+        }
+
+        return {
+          data: {
+            type: 'file',
+            encoding: 'base64',
+            content: Buffer.from(files[remotePath], 'utf8').toString('base64')
+          }
+        };
+      });
+
+      const actions = [
+        {
+          uses: 'owner/repo/.github/workflows/reusable.yml@v1',
+          owner: 'owner',
+          repo: 'repo',
+          actionPath: '.github/workflows/reusable.yml',
+          ref: 'v1',
+          workflowFile: 'ci.yml',
+          sourceWorkflowFile: 'ci.yml',
+          sourceJobName: 'call-reusable',
+          supported: true,
+          isFirstParty: false
+        }
+      ];
+
+      const result = await expandActionReferences(mockOctokit, actions, {
+        workspaceDir: '/tmp/workspace',
+        expansionCache: new Map(),
+        expansionStack: new Set()
+      });
+
+      expect(result).toHaveLength(2);
+      expect(result[1]).toMatchObject({
+        uses: 'owner/nested-action@v2',
+        owner: 'owner',
+        repo: 'nested-action',
+        actionPath: '',
+        ref: 'v2',
+        workflowFile: 'ci.yml',
+        entrypointUses: 'owner/repo/.github/workflows/reusable.yml@v1',
+        jobName: 'nested',
+        stepName: 'unnamed step',
+        sourceWorkflowFile: 'ci.yml',
+        sourceJobName: 'call-reusable',
+        supported: true
+      });
+    });
+
+    test('should resolve remote composite local paths relative to the action directory', async () => {
+      mockOctokit.rest.repos.getContent.mockImplementation(async ({ path: remotePath }) => {
+        const files = {
+          'actions/parent/action.yml': `
+name: Parent
+runs:
+  using: composite
+  steps:
+    - uses: ./child
+`,
+          'actions/parent/child/action.yml': `
+name: Child
+runs:
+  using: composite
+  steps:
+    - uses: child-owner/child-action@v3
+`,
+          'action.yml': `
+name: Terminal Action
+runs:
+  using: node24
+  main: index.js
+`
+        };
+
+        if (!files[remotePath]) {
+          const error = new Error('Not Found');
+          error.status = 404;
+          throw error;
+        }
+
+        return {
+          data: {
+            type: 'file',
+            encoding: 'base64',
+            content: Buffer.from(files[remotePath], 'utf8').toString('base64')
+          }
+        };
+      });
+
+      const actions = [
+        {
+          uses: 'owner/repo/actions/parent@v1',
+          owner: 'owner',
+          repo: 'repo',
+          actionPath: 'actions/parent',
+          ref: 'v1',
+          workflowFile: 'ci.yml',
+          supported: true,
+          isFirstParty: false
+        }
+      ];
+
+      const result = await expandActionReferences(mockOctokit, actions, {
+        workspaceDir: '/tmp/workspace',
+        expansionCache: new Map(),
+        expansionStack: new Set()
+      });
+
+      expect(result.some(action => action.uses === 'child-owner/child-action@v3')).toBe(true);
+    });
+
+    test('should resolve reusable workflow local paths relative to the remote repo', async () => {
+      mockOctokit.rest.repos.getContent.mockImplementation(async ({ path: remotePath }) => {
+        const files = {
+          '.github/workflows/reusable.yml': `
+name: Reusable
+on:
+  workflow_call:
+jobs:
+  nested:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./.github/actions/local-from-workflow
+`,
+          '.github/actions/local-from-workflow/action.yml': `
+name: Local From Workflow
+runs:
+  using: composite
+  steps:
+    - uses: local-owner/local-action@v4
+`
+        };
+
+        if (!files[remotePath]) {
+          const error = new Error('Not Found');
+          error.status = 404;
+          throw error;
+        }
+
+        return {
+          data: {
+            type: 'file',
+            encoding: 'base64',
+            content: Buffer.from(files[remotePath], 'utf8').toString('base64')
+          }
+        };
+      });
+
+      const actions = [
+        {
+          uses: 'owner/repo/.github/workflows/reusable.yml@v1',
+          owner: 'owner',
+          repo: 'repo',
+          actionPath: '.github/workflows/reusable.yml',
+          ref: 'v1',
+          workflowFile: 'ci.yml',
+          supported: true,
+          isFirstParty: false
+        }
+      ];
+
+      const result = await expandActionReferences(mockOctokit, actions, {
+        workspaceDir: '/tmp/phase4-reusable-local-workspace',
+        expansionCache: new Map(),
+        expansionStack: new Set()
+      });
+
+      expect(result.some(action => action.uses === 'local-owner/local-action@v4')).toBe(true);
+    });
+
+    test('should skip remote docker actions without reporting as unsupported', async () => {
+      mockOctokit.rest.repos.getContent.mockImplementation(async ({ path: remotePath }) => {
+        const files = {
+          'action.yml': `
+name: Docker Action
+runs:
+  using: docker
+  image: Dockerfile
+`
+        };
+
+        if (!files[remotePath]) {
+          const error = new Error('Not Found');
+          error.status = 404;
+          throw error;
+        }
+
+        return {
+          data: {
+            type: 'file',
+            encoding: 'base64',
+            content: Buffer.from(files[remotePath], 'utf8').toString('base64')
+          }
+        };
+      });
+
+      const actions = [
+        {
+          uses: 'owner/repo@v1',
+          owner: 'owner',
+          repo: 'repo',
+          actionPath: '',
+          ref: 'v1',
+          workflowFile: 'ci.yml',
+          supported: true,
+          isFirstParty: false
+        }
+      ];
+
+      const result = await expandRemoteReference(mockOctokit, actions[0], {
+        workspaceDir: '/tmp/workspace',
+        expansionCache: new Map(),
+        expansionStack: new Set()
+      });
+
+      expect(result).toEqual([]);
+    });
+
+    test('should not report node-based remote actions as unsupported', async () => {
+      mockOctokit.rest.repos.getContent.mockImplementation(async ({ path: remotePath }) => {
+        const files = {
+          'action.yml': `
+name: Node Action
+runs:
+  using: node24
+  main: index.js
+`
+        };
+
+        if (!files[remotePath]) {
+          const error = new Error('Not Found');
+          error.status = 404;
+          throw error;
+        }
+
+        return {
+          data: {
+            type: 'file',
+            encoding: 'base64',
+            content: Buffer.from(files[remotePath], 'utf8').toString('base64')
+          }
+        };
+      });
+
+      const actions = [
+        {
+          uses: 'owner/repo@v1',
+          owner: 'owner',
+          repo: 'repo',
+          actionPath: '',
+          ref: 'v1',
+          workflowFile: 'ci.yml',
+          supported: true,
+          isFirstParty: false
+        }
+      ];
+
+      const result = await expandRemoteReference(mockOctokit, actions[0], {
+        workspaceDir: '/tmp/workspace',
+        expansionCache: new Map(),
+        expansionStack: new Set()
+      });
+
+      expect(result).toEqual([]);
+    });
+  });
+
   describe('Action execution', () => {
     const testWorkspaceDir = '/tmp/test-action-workspace';
     const testWorkflowsDir = path.join(testWorkspaceDir, '.github', 'workflows');
@@ -1008,6 +1707,45 @@ jobs:
       expect(unsupportedOutput).toHaveLength(2);
       expect(mockCore.setFailed).not.toHaveBeenCalled();
       expect(mockCore.warning).toHaveBeenCalledWith(expect.stringContaining('unsupported action reference'));
+    });
+
+    test('should recurse into local composite actions during action execution', async () => {
+      const localActionDir = path.join(testWorkspaceDir, '.github', 'actions', 'composite');
+      fs.mkdirSync(localActionDir, { recursive: true });
+
+      fs.writeFileSync(
+        path.join(testWorkflowsDir, 'ci.yml'),
+        `
+name: CI
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./.github/actions/composite
+`
+      );
+
+      fs.writeFileSync(
+        path.join(localActionDir, 'action.yml'),
+        `
+name: Composite
+runs:
+  using: composite
+  steps:
+    - uses: owner/repo@1234567890abcdef1234567890abcdef12345678
+`
+      );
+
+      await run();
+
+      expect(mockCore.setOutput).toHaveBeenCalledWith('all-passed', true);
+      const immutableCall = mockCore.setOutput.mock.calls.find(c => c[0] === 'immutable-actions');
+      const immutableOutput = JSON.parse(immutableCall[1]);
+      expect(immutableOutput).toHaveLength(1);
+      expect(immutableOutput[0].uses).toBe('owner/repo@1234567890abcdef1234567890abcdef12345678');
+      const unsupportedCall = mockCore.setOutput.mock.calls.find(c => c[0] === 'unsupported-actions');
+      expect(JSON.parse(unsupportedCall[1])).toHaveLength(0);
     });
 
     test('should check first-party actions when include-first-party is true', async () => {
