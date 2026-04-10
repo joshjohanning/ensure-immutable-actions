@@ -430,11 +430,11 @@ export async function expandRemoteReusableWorkflow(octokit, action, content, opt
           nestedTemplates,
           job.uses,
           {
-              jobName,
-              entrypointUses: action.entrypointUses || action.uses,
-              sourceWorkflowFile: action.sourceWorkflowFile || action.workflowFile,
-              sourceJobName: action.sourceJobName || action.jobName,
-              sourceStepName: action.sourceStepName || action.stepName
+            jobName,
+            entrypointUses: action.entrypointUses || action.uses,
+            sourceWorkflowFile: action.sourceWorkflowFile || action.workflowFile,
+            sourceJobName: action.sourceJobName || action.jobName,
+            sourceStepName: action.sourceStepName || action.stepName
           },
           { workspaceDir: options.workspaceDir }
         );
