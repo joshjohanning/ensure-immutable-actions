@@ -1850,7 +1850,7 @@ runs:
       });
     });
 
-    test('should resolve remote composite local paths relative to the action directory', async () => {
+    test('should resolve remote composite local paths relative to the remote repo root', async () => {
       mockOctokit.rest.repos.getContent.mockImplementation(async ({ path: remotePath }) => {
         const files = {
           'actions/parent/action.yml': `
@@ -1858,9 +1858,9 @@ name: Parent
 runs:
   using: composite
   steps:
-    - uses: ./child
+    - uses: ./.github/actions/child
 `,
-          'actions/parent/child/action.yml': `
+          '.github/actions/child/action.yml': `
 name: Child
 runs:
   using: composite
@@ -1910,6 +1910,14 @@ runs:
       });
 
       expect(result.some(action => action.uses === 'child-owner/child-action@v3')).toBe(true);
+      expect(mockOctokit.rest.repos.getContent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          owner: 'owner',
+          repo: 'repo',
+          path: '.github/actions/child/action.yml',
+          ref: 'v1'
+        })
+      );
     });
 
     test('should resolve reusable workflow local paths relative to the remote repo', async () => {

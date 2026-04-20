@@ -687,7 +687,6 @@ export async function expandRemoteCompositeAction(octokit, action, content, opti
     }
 
     const nestedTemplates = [];
-    const currentActionDir = action.actionPath || '.';
 
     for (const step of actionDefinition?.runs?.steps || []) {
       if (!step?.uses) {
@@ -696,7 +695,7 @@ export async function expandRemoteCompositeAction(octokit, action, content, opti
 
       let nestedUses = step.uses;
       if (nestedUses.startsWith('./')) {
-        const resolvedPath = path.posix.normalize(path.posix.join(currentActionDir, nestedUses));
+        const resolvedPath = path.posix.normalize(nestedUses);
         nestedUses = `${action.owner}/${action.repo}/${resolvedPath}@${action.ref}`;
       }
 
