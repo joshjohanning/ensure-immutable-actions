@@ -831,10 +831,7 @@ export function getWorkflowFiles(workflowsInput, excludeWorkflowsInput, workspac
 
     // Apply exclusions (exact names or glob patterns)
     if (excludeWorkflowsInput) {
-      const excludePatterns = excludeWorkflowsInput
-        .split(',')
-        .map(w => w.trim())
-        .filter(Boolean);
+      const excludePatterns = parseWorkflowPatterns(excludeWorkflowsInput);
       workflowFiles = workflowFiles.filter(f => {
         const basename = path.basename(f);
         return !excludePatterns.some(pattern => matchesPattern(basename, pattern));
