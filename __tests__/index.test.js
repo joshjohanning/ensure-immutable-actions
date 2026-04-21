@@ -646,6 +646,46 @@ jobs:
 
       fs.rmSync(workspaceDir, { recursive: true, force: true });
     });
+
+    test('should skip excluded nested local reusable workflows', () => {
+      const workspaceDir = '/tmp/test-workflow-excluded-nested-local-reusable';
+      const workflowsDir = path.join(workspaceDir, '.github', 'workflows');
+
+      fs.mkdirSync(workflowsDir, { recursive: true });
+
+      fs.writeFileSync(
+        path.join(workflowsDir, 'ci.yml'),
+        `
+name: CI
+on: push
+jobs:
+  reusable:
+    uses: ./.github/workflows/example.yml
+`
+      );
+
+      fs.writeFileSync(
+        path.join(workflowsDir, 'example.yml'),
+        `
+name: Example
+on:
+  workflow_call:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: child-owner/child-action@v3
+`
+      );
+
+      const actions = extractActionsFromWorkflow(path.join(workflowsDir, 'ci.yml'), workspaceDir, {
+        excludeWorkflowPatterns: ['example.yml']
+      });
+
+      expect(actions).toHaveLength(0);
+
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+    });
   });
 
   describe('getWorkflowFiles', () => {

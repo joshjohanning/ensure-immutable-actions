@@ -149,6 +149,28 @@ export function resolveLocalReusableWorkflowPath(uses, workspaceDir, baseDir) {
 }
 
 /**
+ * Parse workflow include/exclude input into individual patterns
+ * @param {string} patternsInput - Comma-separated workflow patterns
+ * @returns {Array<string>} Normalized workflow patterns
+ */
+export function parseWorkflowPatterns(patternsInput) {
+  return (patternsInput || '')
+    .split(',')
+    .map(pattern => pattern.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Check whether a workflow basename matches any configured exclude pattern
+ * @param {string} workflowFile - Workflow basename
+ * @param {Array<string>} excludeWorkflowPatterns - Exclude patterns
+ * @returns {boolean} True when the workflow should be skipped
+ */
+export function isExcludedWorkflow(workflowFile, excludeWorkflowPatterns = []) {
+  return excludeWorkflowPatterns.some(pattern => matchesPattern(workflowFile, pattern));
+}
+
+/**
  * Check if a local uses reference points to a reusable workflow file
  * @param {string} uses - Raw local uses reference
  * @returns {boolean} True when the reference targets a local reusable workflow
@@ -244,7 +266,13 @@ export function extractActionsFromLocalAction(uses, metadata, workspaceDir, base
  * @param {string} baseDir - Directory to resolve nested local references from
  * @returns {Array} Extracted nested action references
  */
-export function extractActionsFromLocalReusableWorkflow(uses, metadata, workspaceDir, baseDir) {
+export function extractActionsFromLocalReusableWorkflow(
+  uses,
+  metadata,
+  workspaceDir,
+  baseDir,
+  excludeWorkflowPatterns = []
+) {
   const workflowPath = resolveLocalReusableWorkflowPath(uses, workspaceDir, baseDir);
   if (!fs.existsSync(workflowPath)) {
     return [createUnsupportedLocalAction(uses, metadata, 'Unsupported local reusable workflow: file not found')];
@@ -256,6 +284,9 @@ export function extractActionsFromLocalReusableWorkflow(uses, metadata, workspac
     const nestedActions = [];
     const jobs = workflow?.jobs || {};
     const workflowFile = path.basename(workflowPath);
+    if (isExcludedWorkflow(workflowFile, excludeWorkflowPatterns)) {
+      return [];
+    }
     const workflowBaseDir = path.dirname(workflowPath);
 
     for (const [jobName, job] of Object.entries(jobs)) {
@@ -273,7 +304,8 @@ export function extractActionsFromLocalReusableWorkflow(uses, metadata, workspac
           },
           {
             workspaceDir,
-            baseDir: workflowBaseDir
+            baseDir: workflowBaseDir,
+            excludeWorkflowPatterns
           }
         );
       }
@@ -294,7 +326,8 @@ export function extractActionsFromLocalReusableWorkflow(uses, metadata, workspac
             },
             {
               workspaceDir,
-              baseDir: workflowBaseDir
+              baseDir: workflowBaseDir,
+              excludeWorkflowPatterns
             }
           );
         }
@@ -319,10 +352,13 @@ export function addParsedAction(actions, uses, metadata, options = {}) {
   const workspaceDir = options.workspaceDir || process.env.GITHUB_WORKSPACE || process.cwd();
   const baseDir = options.baseDir || workspaceDir;
   const visitedLocalActions = options.visitedLocalActions || new Set();
+  const excludeWorkflowPatterns = options.excludeWorkflowPatterns || [];
 
   if (uses.startsWith('./')) {
     if (isLocalReusableWorkflowReference(uses)) {
-      actions.push(...extractActionsFromLocalReusableWorkflow(uses, metadata, workspaceDir, baseDir));
+      actions.push(
+        ...extractActionsFromLocalReusableWorkflow(uses, metadata, workspaceDir, baseDir, excludeWorkflowPatterns)
+      );
       return;
     }
     actions.push(...extractActionsFromLocalAction(uses, metadata, workspaceDir, baseDir, visitedLocalActions));
@@ -358,13 +394,19 @@ export function addParsedAction(actions, uses, metadata, options = {}) {
  * Extract all action references from a workflow file
  * @param {string} workflowPath - Path to workflow YAML file
  * @param {string} workspaceDir - Repository workspace root
+ * @param {Object} options - Workflow extraction options
  * @returns {Array} Array of action references
  */
-export function extractActionsFromWorkflow(workflowPath, workspaceDir = process.env.GITHUB_WORKSPACE || process.cwd()) {
+export function extractActionsFromWorkflow(
+  workflowPath,
+  workspaceDir = process.env.GITHUB_WORKSPACE || process.cwd(),
+  options = {}
+) {
   try {
     const content = fs.readFileSync(workflowPath, 'utf8');
     const workflow = YAML.parse(content);
     const workflowFile = path.basename(workflowPath);
+    const excludeWorkflowPatterns = options.excludeWorkflowPatterns || [];
 
     const actions = [];
     const jobs = workflow?.jobs || {};
@@ -382,7 +424,8 @@ export function extractActionsFromWorkflow(workflowPath, workspaceDir = process.
             sourceJobName: jobName
           },
           {
-            workspaceDir
+            workspaceDir,
+            excludeWorkflowPatterns
           }
         );
       }
@@ -403,7 +446,8 @@ export function extractActionsFromWorkflow(workflowPath, workspaceDir = process.
               sourceStepName: step.name || 'unnamed step'
             },
             {
-              workspaceDir
+              workspaceDir,
+              excludeWorkflowPatterns
             }
           );
         }
@@ -1190,6 +1234,7 @@ export async function run() {
 
     // Get workflow files to check
     const workflowFiles = getWorkflowFiles(workflowsInput, excludeWorkflowsInput, workspaceDir);
+    const excludeWorkflowPatterns = parseWorkflowPatterns(excludeWorkflowsInput);
 
     if (workflowFiles.length === 0) {
       core.warning('No workflow files found to check');
@@ -1210,7 +1255,9 @@ export async function run() {
     for (const workflowFile of workflowFiles) {
       const basename = path.basename(workflowFile);
       core.info(`Parsing workflow: ${basename}`);
-      const actions = extractActionsFromWorkflow(workflowFile, workspaceDir);
+      const actions = extractActionsFromWorkflow(workflowFile, workspaceDir, {
+        excludeWorkflowPatterns
+      });
       core.info(`  Found ${actions.length} action(s)`);
       allActions.push(...actions);
     }
