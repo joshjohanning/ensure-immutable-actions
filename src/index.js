@@ -146,7 +146,12 @@ export function resolveLocalReusableWorkflowPath(uses, workspaceDir, baseDir) {
     }
   }
 
-  return candidatePaths[0];
+  // Ensure fallback is also within workspace to prevent path traversal
+  const fallback = candidatePaths[0];
+  if (!fallback.startsWith(normalizedWorkspace + path.sep)) {
+    return null;
+  }
+  return fallback;
 }
 
 /**
@@ -280,7 +285,7 @@ export function extractActionsFromLocalReusableWorkflow(
   visitedWorkflows = new Set()
 ) {
   const workflowPath = resolveLocalReusableWorkflowPath(uses, workspaceDir, baseDir);
-  if (!fs.existsSync(workflowPath)) {
+  if (!workflowPath || !fs.existsSync(workflowPath)) {
     return [createUnsupportedLocalAction(uses, metadata, 'Unsupported local reusable workflow: file not found')];
   }
 

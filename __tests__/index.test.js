@@ -213,6 +213,27 @@ describe('Ensure Immutable Actions', () => {
 
       fs.rmSync(workspaceDir, { recursive: true, force: true });
     });
+
+    test('should reject path traversal outside workspace', () => {
+      const workspaceDir = '/tmp/test-resolve-traversal';
+      const outsideDir = '/tmp/test-resolve-traversal-outside';
+      const workflowsDir = path.join(workspaceDir, '.github', 'workflows');
+
+      fs.mkdirSync(workflowsDir, { recursive: true });
+      fs.mkdirSync(outsideDir, { recursive: true });
+      fs.writeFileSync(path.join(outsideDir, 'evil.yml'), 'name: Evil');
+
+      const resolved = resolveLocalReusableWorkflowPath(
+        './.github/workflows/../../../../../../tmp/test-resolve-traversal-outside/evil.yml',
+        workspaceDir,
+        workflowsDir
+      );
+
+      expect(resolved).toBeNull();
+
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+      fs.rmSync(outsideDir, { recursive: true, force: true });
+    });
   });
 
   describe('getActionCacheKey', () => {
