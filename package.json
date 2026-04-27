@@ -44,7 +44,7 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@actions/core": "^3.0.0",
+    "@actions/core": "^3.0.1",
     "@octokit/rest": "^22.0.1",
     "minimatch": "^10.2.5",
     "yaml": "^2.8.3"
