@@ -623,7 +623,11 @@ export async function expandRemoteReusableWorkflow(octokit, action, content, opt
         let nestedUses = job.uses;
         if (nestedUses.startsWith('./')) {
           const resolvedPath = path.posix.normalize(nestedUses);
-          nestedUses = `${action.owner}/${action.repo}/${resolvedPath}@${action.ref}`;
+          if (resolvedPath === '.') {
+            nestedUses = `${action.owner}/${action.repo}@${action.ref}`;
+          } else {
+            nestedUses = `${action.owner}/${action.repo}/${resolvedPath}@${action.ref}`;
+          }
         }
         addParsedAction(
           nestedTemplates,
@@ -647,7 +651,11 @@ export async function expandRemoteReusableWorkflow(octokit, action, content, opt
           let nestedUses = step.uses;
           if (nestedUses.startsWith('./')) {
             const resolvedPath = path.posix.normalize(nestedUses);
-            nestedUses = `${action.owner}/${action.repo}/${resolvedPath}@${action.ref}`;
+            if (resolvedPath === '.') {
+              nestedUses = `${action.owner}/${action.repo}@${action.ref}`;
+            } else {
+              nestedUses = `${action.owner}/${action.repo}/${resolvedPath}@${action.ref}`;
+            }
           }
           addParsedAction(
             nestedTemplates,

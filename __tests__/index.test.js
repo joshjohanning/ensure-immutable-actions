@@ -240,8 +240,7 @@ describe('Ensure Immutable Actions', () => {
 
       const resolved = resolveLocalReusableWorkflowPath(
         './.github/workflows/../../../../../../tmp/test-resolve-traversal-outside/evil.yml',
-        workspaceDir,
-        workflowsDir
+        workspaceDir
       );
 
       expect(resolved).toBeNull();
