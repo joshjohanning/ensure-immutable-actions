@@ -222,7 +222,7 @@ describe('Ensure Immutable Actions', () => {
       fs.mkdirSync(workflowsDir, { recursive: true });
       fs.writeFileSync(path.join(workflowsDir, 'child.yml'), 'name: Child');
 
-      const resolved = resolveLocalReusableWorkflowPath('./.github/workflows/child.yml', workspaceDir, workflowsDir);
+      const resolved = resolveLocalReusableWorkflowPath('./.github/workflows/child.yml', workspaceDir);
 
       expect(resolved).toBe(path.join(workspaceDir, '.github', 'workflows', 'child.yml'));
 

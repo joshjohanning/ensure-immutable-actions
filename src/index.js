@@ -285,17 +285,22 @@ export function extractActionsFromLocalAction(uses, metadata, workspaceDir, base
  * @param {string} uses - Raw local workflow reference
  * @param {Object} metadata - Workflow metadata for the reference
  * @param {string} workspaceDir - Repository workspace root
- * @param {string} baseDir - Directory to resolve nested local references from
+ * @param {Array<string>} excludeWorkflowPatterns - Exclude patterns
+ * @param {Set<string>} visitedWorkflows - Already-visited workflow paths for cycle detection
  * @returns {Array} Extracted nested action references
  */
 export function extractActionsFromLocalReusableWorkflow(
   uses,
   metadata,
   workspaceDir,
-  baseDir,
   excludeWorkflowPatterns = [],
   visitedWorkflows = new Set()
 ) {
+  const workflowBasename = path.posix.basename(uses);
+  if (isExcludedWorkflow(workflowBasename, excludeWorkflowPatterns)) {
+    return [];
+  }
+
   const workflowPath = resolveLocalReusableWorkflowPath(uses, workspaceDir);
   if (!workflowPath || !fs.existsSync(workflowPath)) {
     return [createUnsupportedLocalAction(uses, metadata, 'Unsupported local reusable workflow: file not found')];
@@ -312,9 +317,6 @@ export function extractActionsFromLocalReusableWorkflow(
     const nestedActions = [];
     const jobs = workflow?.jobs || {};
     const workflowFile = path.basename(workflowPath);
-    if (isExcludedWorkflow(workflowFile, excludeWorkflowPatterns)) {
-      return [];
-    }
     const nextVisitedWorkflows = new Set(visitedWorkflows);
     nextVisitedWorkflows.add(workflowPath);
 
@@ -391,7 +393,6 @@ export function addParsedAction(actions, uses, metadata, options = {}) {
           uses,
           metadata,
           workspaceDir,
-          baseDir,
           excludeWorkflowPatterns,
           visitedWorkflows
         )
@@ -709,7 +710,11 @@ export async function expandRemoteCompositeAction(octokit, action, content, opti
       let nestedUses = step.uses;
       if (nestedUses.startsWith('./')) {
         const resolvedPath = path.posix.normalize(nestedUses);
-        nestedUses = `${action.owner}/${action.repo}/${resolvedPath}@${action.ref}`;
+        if (resolvedPath === '.') {
+          nestedUses = `${action.owner}/${action.repo}@${action.ref}`;
+        } else {
+          nestedUses = `${action.owner}/${action.repo}/${resolvedPath}@${action.ref}`;
+        }
       }
 
       addParsedAction(
