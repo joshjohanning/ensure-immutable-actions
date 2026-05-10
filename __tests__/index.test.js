@@ -1863,7 +1863,7 @@ runs:
       });
     });
 
-    test('should resolve remote composite local paths relative to the remote repo root', async () => {
+    test('should resolve remote composite local paths relative to the composite action directory', async () => {
       mockOctokit.rest.repos.getContent.mockImplementation(async ({ path: remotePath }) => {
         const files = {
           'actions/parent/action.yml': `
@@ -1871,9 +1871,9 @@ name: Parent
 runs:
   using: composite
   steps:
-    - uses: ./.github/actions/child
+    - uses: ./child
 `,
-          '.github/actions/child/action.yml': `
+          'actions/parent/child/action.yml': `
 name: Child
 runs:
   using: composite
@@ -1927,7 +1927,7 @@ runs:
         expect.objectContaining({
           owner: 'owner',
           repo: 'repo',
-          path: '.github/actions/child/action.yml',
+          path: 'actions/parent/child/action.yml',
           ref: 'v1'
         })
       );
