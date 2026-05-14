@@ -717,7 +717,8 @@ export async function expandRemoteCompositeAction(octokit, action, content, opti
 
       let nestedUses = step.uses;
       if (nestedUses.startsWith('./')) {
-        const resolvedPath = path.posix.normalize(nestedUses);
+        const basePath = action.actionPath || '.';
+        const resolvedPath = path.posix.normalize(path.posix.join(basePath, nestedUses));
         if (resolvedPath === '.') {
           nestedUses = `${action.owner}/${action.repo}@${action.ref}`;
         } else {
