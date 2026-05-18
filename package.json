@@ -47,7 +47,7 @@
     "@actions/core": "^3.0.1",
     "@octokit/rest": "^22.0.1",
     "minimatch": "^10.2.5",
-    "yaml": "^2.8.4"
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@joshjohanning/make-coverage-badge-better": "^1.0.1",
