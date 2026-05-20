@@ -1074,6 +1074,16 @@ jobs:
         isExcludedWorkflow('owner/repo/.github/workflows/ci.yml@v2', ['owner/repo/.github/workflows/ci.yml@v1'])
       ).toBe(false);
     });
+
+    test('should not treat @ in workflow filenames as a ref delimiter', () => {
+      expect(
+        isExcludedWorkflow('owner/repo/.github/workflows/ci@2.yml@v1', ['owner/repo/.github/workflows/ci@2.yml'])
+      ).toBe(true);
+      expect(isExcludedWorkflow('owner/repo/.github/workflows/ci@2.yml@v1', ['ci@2.yml'])).toBe(true);
+      expect(isExcludedWorkflow('owner/repo/.github/workflows/ci@2.yml', ['owner/repo/.github/workflows/ci'])).toBe(
+        false
+      );
+    });
   });
 
   describe('isFullSHA', () => {

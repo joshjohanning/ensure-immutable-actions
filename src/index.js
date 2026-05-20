@@ -184,14 +184,22 @@ function normalizeWorkflowReference(workflowReference, stripRef = false) {
     normalized = normalized.slice(2);
   }
 
-  if (stripRef) {
+  if (stripRef && hasWorkflowRefSuffix(normalized)) {
     const refIndex = normalized.lastIndexOf('@');
-    if (refIndex > 0) {
-      normalized = normalized.slice(0, refIndex);
-    }
+    normalized = normalized.slice(0, refIndex);
   }
 
   return normalized;
+}
+
+function hasWorkflowRefSuffix(workflowReference) {
+  const refIndex = workflowReference.lastIndexOf('@');
+  if (refIndex <= 0 || refIndex === workflowReference.length - 1) {
+    return false;
+  }
+
+  const workflowPath = workflowReference.slice(0, refIndex);
+  return workflowPath.endsWith('.yml') || workflowPath.endsWith('.yaml');
 }
 
 /**
@@ -208,7 +216,7 @@ export function isExcludedWorkflow(workflowReference, excludeWorkflowPatterns = 
   return excludeWorkflowPatterns.some(pattern => {
     const normalizedPattern = normalizeWorkflowReference(pattern, false);
     if (normalizedPattern.includes('/')) {
-      const target = normalizedPattern.includes('@') ? normalizedReference : normalizedReferenceWithoutRef;
+      const target = hasWorkflowRefSuffix(normalizedPattern) ? normalizedReference : normalizedReferenceWithoutRef;
       return matchesPattern(target, normalizedPattern);
     }
 
