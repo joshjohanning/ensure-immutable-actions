@@ -56,6 +56,7 @@ const {
   formatTraversalHint,
   getUnsupportedReference,
   getWorkflowFiles,
+  isExcludedWorkflow,
   isLocalReusableWorkflowReference,
   isReusableWorkflowReference,
   resolveLocalActionDirectory,
@@ -813,6 +814,35 @@ jobs:
       fs.rmSync(workspaceDir, { recursive: true, force: true });
     });
 
+    test('should not skip remote reusable workflows when a bare filename exclusion differs from a path exclusion', () => {
+      const workspaceDir = '/tmp/test-workflow-path-specific-remote-reusable';
+      const workflowsDir = path.join(workspaceDir, '.github', 'workflows');
+
+      fs.mkdirSync(workflowsDir, { recursive: true });
+
+      fs.writeFileSync(
+        path.join(workflowsDir, 'ci.yml'),
+        `
+name: CI
+on: push
+jobs:
+  reusable:
+    uses: owner/repo/.github/workflows/example.yml@v1
+  other-reusable:
+    uses: other/repo/.github/workflows/example.yml@v1
+`
+      );
+
+      const actions = extractActionsFromWorkflow(path.join(workflowsDir, 'ci.yml'), workspaceDir, {
+        excludeWorkflowPatterns: ['owner/repo/.github/workflows/example.yml']
+      });
+
+      expect(actions).toHaveLength(1);
+      expect(actions[0].uses).toBe('other/repo/.github/workflows/example.yml@v1');
+
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+    });
+
     test('should detect and skip circular local reusable workflow references', () => {
       const workspaceDir = '/tmp/test-workflow-circular-local-reusable';
       const workflowsDir = path.join(workspaceDir, '.github', 'workflows');
@@ -954,6 +984,14 @@ jobs:
       expect(files.some(f => f.endsWith('experimental-b.yml'))).toBe(false);
     });
 
+    test('should support full-path patterns in exclude-workflows input', () => {
+      const files = getWorkflowFiles('', '.github/workflows/ci.yml', testWorkspaceDir);
+      expect(files).toHaveLength(2);
+      expect(files.some(f => f.endsWith('ci.yml'))).toBe(false);
+      expect(files.some(f => f.endsWith('deploy.yml'))).toBe(true);
+      expect(files.some(f => f.endsWith('test.yaml'))).toBe(true);
+    });
+
     test('should support mixing exact names and glob patterns', () => {
       fs.writeFileSync(path.join(testWorkflowsDir, 'deploy-staging.yml'), 'test');
       fs.writeFileSync(path.join(testWorkflowsDir, 'deploy-prod.yml'), 'test');
@@ -1004,6 +1042,47 @@ jobs:
     test('should exact-match filenames containing glob metacharacters', () => {
       expect(matchesPattern('ci[1].yml', 'ci[1].yml')).toBe(true);
       expect(matchesPattern('ci{a,b}.yml', 'ci{a,b}.yml')).toBe(true);
+    });
+  });
+
+  describe('isExcludedWorkflow', () => {
+    test('should match bare filename patterns against workflow basenames', () => {
+      expect(isExcludedWorkflow('owner/repo/.github/workflows/ci.yml@v1', ['ci.yml'])).toBe(true);
+      expect(isExcludedWorkflow('owner/repo/.github/workflows/deploy.yml@v1', ['ci.yml'])).toBe(false);
+    });
+
+    test('should match path patterns against the workflow reference without the ref', () => {
+      expect(
+        isExcludedWorkflow('owner/repo/.github/workflows/ci.yml@v1', ['owner/repo/.github/workflows/ci.yml'])
+      ).toBe(true);
+      expect(
+        isExcludedWorkflow('other/repo/.github/workflows/ci.yml@v1', ['owner/repo/.github/workflows/ci.yml'])
+      ).toBe(false);
+    });
+
+    test('should support glob path patterns for workflow references', () => {
+      expect(isExcludedWorkflow('owner/repo/.github/workflows/ci.yml@v1', ['owner/repo/**'])).toBe(true);
+      expect(isExcludedWorkflow('owner/repo/.github/workflows/ci.yml@v1', ['**/ci.yml'])).toBe(true);
+      expect(isExcludedWorkflow('other/repo/.github/workflows/ci.yml@v1', ['owner/repo/**'])).toBe(false);
+    });
+
+    test('should match path patterns with an explicit ref when provided', () => {
+      expect(
+        isExcludedWorkflow('owner/repo/.github/workflows/ci.yml@v1', ['owner/repo/.github/workflows/ci.yml@v1'])
+      ).toBe(true);
+      expect(
+        isExcludedWorkflow('owner/repo/.github/workflows/ci.yml@v2', ['owner/repo/.github/workflows/ci.yml@v1'])
+      ).toBe(false);
+    });
+
+    test('should not treat @ in workflow filenames as a ref delimiter', () => {
+      expect(
+        isExcludedWorkflow('owner/repo/.github/workflows/ci@2.yml@v1', ['owner/repo/.github/workflows/ci@2.yml'])
+      ).toBe(true);
+      expect(isExcludedWorkflow('owner/repo/.github/workflows/ci@2.yml@v1', ['ci@2.yml'])).toBe(true);
+      expect(isExcludedWorkflow('owner/repo/.github/workflows/ci@2.yml', ['owner/repo/.github/workflows/ci'])).toBe(
+        false
+      );
     });
   });
 

@@ -98,6 +98,8 @@ jobs:
     exclude-workflows: 'experimental.yml,temp-workflow.yml'
 ```
 
+Bare filenames exclude matching workflow names everywhere, including during recursive traversal of reusable workflows.
+
 ### Exclude workflows matching a glob pattern
 
 ```yaml
@@ -107,6 +109,15 @@ jobs:
     exclude-workflows: 'experimental-*.yml'
 ```
 
+Patterns containing `/` match the full workflow path without the `@ref`, which lets you exclude one remote reusable workflow without excluding identically named workflows in other repositories:
+
+```yaml
+- name: Ensure immutable actions
+  uses: joshjohanning/ensure-immutable-actions@v2
+  with:
+    exclude-workflows: 'some-org/some-repo/.github/workflows/ci.yml'
+```
+
 ## Inputs
 
 | Input                 | Description                                                                                                                                                                                                                                    | Required | Default               |
@@ -114,7 +125,7 @@ jobs:
 | `github-token`        | GitHub token for API calls. The default `github.token` works for public repos. For recursion into private/internal repos, use a PAT or GitHub App token with `contents: read` scope.                                                           | Yes      | `${{ github.token }}` |
 | `fail-on-mutable`     | Fail the workflow if mutable actions are found                                                                                                                                                                                                 | No       | `true`                |
 | `workflows`           | Specific workflow files to check (comma-separated filenames or glob patterns, e.g., `ci.yml,deploy-*.yml`). **If not specified, checks ALL workflows in `.github/workflows/`.**                                                                | No       | All workflows         |
-| `exclude-workflows`   | Workflow files to exclude from checks (comma-separated filenames or glob patterns, e.g., `experimental-*.yml`).                                                                                                                                | No       | -                     |
+| `exclude-workflows`   | Workflow files to exclude from checks (comma-separated filenames or glob patterns, e.g., `experimental-*.yml`). Patterns containing `/` match the full workflow path without the `@ref`, e.g., `owner/repo/.github/workflows/ci.yml`.          | No       | -                     |
 | `include-first-party` | Include first-party actions (`actions/*`, `github/*`, `octokit/*`) in immutability checks. When `true`, first-party actions are also checked and appear in `mutable-actions`/`immutable-actions` outputs in addition to `first-party-actions`. | No       | `false`               |
 
 ## Outputs
