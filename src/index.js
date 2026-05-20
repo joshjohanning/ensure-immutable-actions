@@ -178,14 +178,42 @@ export function parseWorkflowPatterns(patternsInput) {
     .filter(Boolean);
 }
 
+function normalizeWorkflowReference(workflowReference, stripRef = false) {
+  let normalized = workflowReference.replace(/\\/g, '/').trim();
+  if (normalized.startsWith('./')) {
+    normalized = normalized.slice(2);
+  }
+
+  if (stripRef) {
+    const refIndex = normalized.lastIndexOf('@');
+    if (refIndex > 0) {
+      normalized = normalized.slice(0, refIndex);
+    }
+  }
+
+  return normalized;
+}
+
 /**
- * Check whether a workflow basename matches any configured exclude pattern
- * @param {string} workflowFile - Workflow basename
+ * Check whether a workflow reference matches any configured exclude pattern
+ * @param {string} workflowReference - Workflow basename or path reference
  * @param {Array<string>} excludeWorkflowPatterns - Exclude patterns
  * @returns {boolean} True when the workflow should be skipped
  */
-export function isExcludedWorkflow(workflowFile, excludeWorkflowPatterns = []) {
-  return excludeWorkflowPatterns.some(pattern => matchesPattern(workflowFile, pattern));
+export function isExcludedWorkflow(workflowReference, excludeWorkflowPatterns = []) {
+  const normalizedReference = normalizeWorkflowReference(workflowReference, false);
+  const normalizedReferenceWithoutRef = normalizeWorkflowReference(workflowReference, true);
+  const workflowBasename = path.posix.basename(normalizedReferenceWithoutRef);
+
+  return excludeWorkflowPatterns.some(pattern => {
+    const normalizedPattern = normalizeWorkflowReference(pattern, false);
+    if (normalizedPattern.includes('/')) {
+      const target = normalizedPattern.includes('@') ? normalizedReference : normalizedReferenceWithoutRef;
+      return matchesPattern(target, normalizedPattern);
+    }
+
+    return matchesPattern(workflowBasename, normalizedPattern);
+  });
 }
 
 /**
@@ -296,8 +324,7 @@ export function extractActionsFromLocalReusableWorkflow(
   excludeWorkflowPatterns = [],
   visitedWorkflows = new Set()
 ) {
-  const workflowBasename = path.posix.basename(uses);
-  if (isExcludedWorkflow(workflowBasename, excludeWorkflowPatterns)) {
+  if (isExcludedWorkflow(uses, excludeWorkflowPatterns)) {
     return [];
   }
 
@@ -419,10 +446,7 @@ export function addParsedAction(actions, uses, metadata, options = {}) {
     return;
   }
 
-  if (
-    isReusableWorkflowReference(parsed) &&
-    isExcludedWorkflow(path.posix.basename(parsed.actionPath), excludeWorkflowPatterns)
-  ) {
+  if (isReusableWorkflowReference(parsed) && isExcludedWorkflow(uses, excludeWorkflowPatterns)) {
     return;
   }
 
@@ -843,7 +867,7 @@ export function matchesPattern(filename, pattern) {
   if (filename === pattern) {
     return true;
   }
-  return minimatch(filename, pattern);
+  return minimatch(filename, pattern, { dot: true });
 }
 
 /**
@@ -896,8 +920,8 @@ export function getWorkflowFiles(workflowsInput, excludeWorkflowsInput, workspac
   if (excludeWorkflowsInput) {
     const excludePatterns = parseWorkflowPatterns(excludeWorkflowsInput);
     workflowFiles = workflowFiles.filter(f => {
-      const basename = path.basename(f);
-      return !excludePatterns.some(pattern => matchesPattern(basename, pattern));
+      const workflowPath = `.github/workflows/${path.basename(f)}`;
+      return !isExcludedWorkflow(workflowPath, excludePatterns);
     });
   }
 
