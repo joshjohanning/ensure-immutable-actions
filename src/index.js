@@ -1299,6 +1299,24 @@ export async function checkAllActions(octokit, actions, includeFirstParty = fals
 }
 
 /**
+ * Determine whether to write a GitHub job summary based on mode and results.
+ * @param {'true'|'false'|'on-failure-only'} writeJobSummary - Summary writing mode
+ * @param {boolean} allPassed - True when no mutable or unsupported references are found
+ * @returns {boolean} True when summary should be written
+ */
+export function shouldWriteJobSummary(writeJobSummary, allPassed) {
+  if (writeJobSummary === 'false') {
+    return false;
+  }
+
+  if (writeJobSummary === 'on-failure-only') {
+    return !allPassed;
+  }
+
+  return true;
+}
+
+/**
  * Main action logic
  */
 export async function run() {
@@ -1307,6 +1325,7 @@ export async function run() {
     const githubToken = core.getInput('github-token');
     const failOnMutable = core.getBooleanInput('fail-on-mutable');
     const includeFirstParty = core.getBooleanInput('include-first-party');
+    const writeJobSummary = core.getInput('write-job-summary').trim();
     const workflowsInput = core.getInput('workflows');
     const excludeWorkflowsInput = core.getInput('exclude-workflows');
 
@@ -1315,9 +1334,18 @@ export async function run() {
       return;
     }
 
+    const validWriteJobSummaryModes = ['true', 'false', 'on-failure-only'];
+    if (!validWriteJobSummaryModes.includes(writeJobSummary)) {
+      core.setFailed(
+        `Invalid 'write-job-summary' input: ${writeJobSummary}. Allowed values: true, false, on-failure-only`
+      );
+      return;
+    }
+
     core.info('Starting Ensure Immutable Actions...');
     core.info(`Fail on mutable: ${failOnMutable}`);
     core.info(`Include first-party: ${includeFirstParty}`);
+    core.info(`Write job summary: ${writeJobSummary}`);
 
     // Get workspace directory
     const workspaceDir = process.env.GITHUB_WORKSPACE || process.cwd();
@@ -1362,14 +1390,16 @@ export async function run() {
       core.setOutput('unsupported-actions', '[]');
       core.setOutput('first-party-actions', '[]');
 
-      // Create summary
-      try {
-        await core.summary
-          .addRaw('# ✅ Immutable Actions Check - All Passed\n\n')
-          .addRaw(`No actions found in checked workflows.`)
-          .write();
-      } catch {
-        core.info('✅ All checks passed (no actions found)');
+      if (shouldWriteJobSummary(writeJobSummary, true)) {
+        // Create summary
+        try {
+          await core.summary
+            .addRaw('# ✅ Immutable Actions Check - All Passed\n\n')
+            .addRaw(`No actions found in checked workflows.`)
+            .write();
+        } catch {
+          core.info('✅ All checks passed (no actions found)');
+        }
       }
 
       return;
@@ -1406,84 +1436,88 @@ export async function run() {
     core.setOutput('first-party-actions', JSON.stringify(firstParty));
     core.setOutput('all-passed', mutable.length === 0 && unsupported.length === 0);
 
+    const allPassed = mutable.length === 0 && unsupported.length === 0;
+
     // Create summary with separate tables per workflow
-    try {
-      let summary = core.summary;
+    if (shouldWriteJobSummary(writeJobSummary, allPassed)) {
+      try {
+        let summary = core.summary;
 
-      if (mutable.length === 0 && unsupported.length === 0) {
-        summary = summary.addRaw('# ✅ Immutable Actions Check - All Passed\n\n');
-      } else {
-        summary = summary.addRaw('# ❌ Immutable Actions Check - Failed\n\n');
+        if (allPassed) {
+          summary = summary.addRaw('# ✅ Immutable Actions Check - All Passed\n\n');
+        } else {
+          summary = summary.addRaw('# ❌ Immutable Actions Check - Failed\n\n');
+        }
+
+        const excludedCount = firstParty.filter(a => a.excluded).length;
+
+        summary = summary
+          .addRaw(`**Workflows Checked:** ${workflowBasenames.join(', ')}\n\n`)
+          .addRaw(
+            `**Summary:** ${excludedCount} excluded, ${immutable.length} immutable, ${mutable.length} mutable, ${unsupported.length} unsupported\n\n`
+          );
+
+        // Add a table for each workflow
+        for (const workflowFile of workflowBasenames) {
+          const workflowData = byWorkflow[workflowFile];
+
+          if (
+            !workflowData ||
+            (workflowData.immutable.length === 0 &&
+              workflowData.mutable.length === 0 &&
+              workflowData.unsupported.length === 0 &&
+              workflowData.firstParty.length === 0)
+          ) {
+            continue;
+          }
+
+          const workflowMutableCount = workflowData.mutable.length;
+          const workflowImmutableCount = workflowData.immutable.length;
+          const workflowUnsupportedCount = workflowData.unsupported.length;
+          const workflowFirstPartyCount = workflowData.firstParty.length;
+          const workflowStatus = workflowMutableCount === 0 && workflowUnsupportedCount === 0 ? '✅' : '❌';
+
+          summary = summary.addRaw(`### ${workflowStatus} ${workflowFile}\n\n`);
+          summary = summary.addRaw(
+            `**Actions:** ${workflowFirstPartyCount} excluded, ${workflowImmutableCount} immutable, ${workflowMutableCount} mutable, ${workflowUnsupportedCount} unsupported\n\n`
+          );
+
+          // Build markdown table
+          let markdownTable = '| Action | Status | Message / Found In |\n';
+          markdownTable += '|--------|--------|--------------------|\n';
+
+          // Iterate each category separately so status reflects check results, not just isFirstParty flag
+          for (const action of workflowData.firstParty) {
+            const actionRef = formatActionReference(action.owner, action.repo, action.ref, action.actionPath);
+            markdownTable += `| ${actionRef} | ✅ First-party | ${action.message} |\n`;
+          }
+          for (const action of workflowData.immutable) {
+            const actionRef = formatActionReference(action.owner, action.repo, action.ref, action.actionPath);
+            markdownTable += `| ${actionRef} | ✅ Immutable | ${action.message} |\n`;
+          }
+          for (const action of workflowData.mutable) {
+            const actionRef = formatActionReference(action.owner, action.repo, action.ref, action.actionPath);
+            const message = formatSummaryMessage(action.message, action.sourceLocations, true);
+            markdownTable += `| ${actionRef} | ❌ Mutable | ${message} |\n`;
+          }
+          for (const action of workflowData.unsupported) {
+            const message = formatSummaryMessage(action.message, action.sourceLocations, true);
+            markdownTable += `| ${action.uses} | ⚠️ Unsupported | ${message} |\n`;
+          }
+
+          summary = summary.addRaw(markdownTable).addRaw('\n');
+        }
+
+        await summary.write();
+      } catch {
+        // Fallback for local development
+        core.info('📊 Immutable Actions Check Results:');
+        core.info(`   Workflows: ${workflowBasenames.join(', ')}`);
+        core.info(`   First-party: ${firstParty.length}`);
+        core.info(`   Immutable: ${immutable.length}`);
+        core.info(`   Mutable: ${mutable.length}`);
+        core.info(`   Unsupported: ${unsupported.length}`);
       }
-
-      const excludedCount = firstParty.filter(a => a.excluded).length;
-
-      summary = summary
-        .addRaw(`**Workflows Checked:** ${workflowBasenames.join(', ')}\n\n`)
-        .addRaw(
-          `**Summary:** ${excludedCount} excluded, ${immutable.length} immutable, ${mutable.length} mutable, ${unsupported.length} unsupported\n\n`
-        );
-
-      // Add a table for each workflow
-      for (const workflowFile of workflowBasenames) {
-        const workflowData = byWorkflow[workflowFile];
-
-        if (
-          !workflowData ||
-          (workflowData.immutable.length === 0 &&
-            workflowData.mutable.length === 0 &&
-            workflowData.unsupported.length === 0 &&
-            workflowData.firstParty.length === 0)
-        ) {
-          continue;
-        }
-
-        const workflowMutableCount = workflowData.mutable.length;
-        const workflowImmutableCount = workflowData.immutable.length;
-        const workflowUnsupportedCount = workflowData.unsupported.length;
-        const workflowFirstPartyCount = workflowData.firstParty.length;
-        const workflowStatus = workflowMutableCount === 0 && workflowUnsupportedCount === 0 ? '✅' : '❌';
-
-        summary = summary.addRaw(`### ${workflowStatus} ${workflowFile}\n\n`);
-        summary = summary.addRaw(
-          `**Actions:** ${workflowFirstPartyCount} excluded, ${workflowImmutableCount} immutable, ${workflowMutableCount} mutable, ${workflowUnsupportedCount} unsupported\n\n`
-        );
-
-        // Build markdown table
-        let markdownTable = '| Action | Status | Message / Found In |\n';
-        markdownTable += '|--------|--------|--------------------|\n';
-
-        // Iterate each category separately so status reflects check results, not just isFirstParty flag
-        for (const action of workflowData.firstParty) {
-          const actionRef = formatActionReference(action.owner, action.repo, action.ref, action.actionPath);
-          markdownTable += `| ${actionRef} | ✅ First-party | ${action.message} |\n`;
-        }
-        for (const action of workflowData.immutable) {
-          const actionRef = formatActionReference(action.owner, action.repo, action.ref, action.actionPath);
-          markdownTable += `| ${actionRef} | ✅ Immutable | ${action.message} |\n`;
-        }
-        for (const action of workflowData.mutable) {
-          const actionRef = formatActionReference(action.owner, action.repo, action.ref, action.actionPath);
-          const message = formatSummaryMessage(action.message, action.sourceLocations, true);
-          markdownTable += `| ${actionRef} | ❌ Mutable | ${message} |\n`;
-        }
-        for (const action of workflowData.unsupported) {
-          const message = formatSummaryMessage(action.message, action.sourceLocations, true);
-          markdownTable += `| ${action.uses} | ⚠️ Unsupported | ${message} |\n`;
-        }
-
-        summary = summary.addRaw(markdownTable).addRaw('\n');
-      }
-
-      await summary.write();
-    } catch {
-      // Fallback for local development
-      core.info('📊 Immutable Actions Check Results:');
-      core.info(`   Workflows: ${workflowBasenames.join(', ')}`);
-      core.info(`   First-party: ${firstParty.length}`);
-      core.info(`   Immutable: ${immutable.length}`);
-      core.info(`   Mutable: ${mutable.length}`);
-      core.info(`   Unsupported: ${unsupported.length}`);
     }
 
     // Log results
@@ -1518,7 +1552,7 @@ export async function run() {
         `Found ${mutable.length} action(s) using mutable releases. ` +
           `Please use immutable releases for supply chain security.`
       );
-    } else if (mutable.length === 0 && unsupported.length === 0) {
+    } else if (allPassed) {
       core.info('\n✅ All actions are using immutable releases!');
     }
   } catch (error) {

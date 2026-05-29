@@ -127,6 +127,7 @@ Patterns containing `/` match the full workflow path without the `@ref`, which l
 | `workflows`           | Specific workflow files to check (comma-separated filenames or glob patterns, e.g., `ci.yml,deploy-*.yml`). **If not specified, checks ALL workflows in `.github/workflows/`.**                                                                | No       | All workflows         |
 | `exclude-workflows`   | Workflow files to exclude from checks (comma-separated filenames or glob patterns, e.g., `experimental-*.yml`). Patterns containing `/` match the full workflow path without the `@ref`, e.g., `owner/repo/.github/workflows/ci.yml`.          | No       | -                     |
 | `include-first-party` | Include first-party actions (`actions/*`, `github/*`, `octokit/*`) in immutability checks. When `true`, first-party actions are also checked and appear in `mutable-actions`/`immutable-actions` outputs in addition to `first-party-actions`. | No       | `false`               |
+| `write-job-summary`   | Controls job summary output: `true` (always write), `false` (never write), or `on-failure-only` (write only when mutable/unsupported references are found).                                                                                    | No       | `true`                |
 
 ## Outputs
 
@@ -155,6 +156,14 @@ Patterns containing `/` match the full workflow path without the `@ref`, which l
 - uses: joshjohanning/ensure-immutable-actions@v2
   with:
     fail-on-mutable: false
+```
+
+### Write summary only when checks fail
+
+```yaml
+- uses: joshjohanning/ensure-immutable-actions@v2
+  with:
+    write-job-summary: on-failure-only
 ```
 
 ### Check only CI/CD workflows

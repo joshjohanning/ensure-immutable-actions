@@ -85,6 +85,7 @@ describe('Ensure Immutable Actions', () => {
     mockCore.getInput.mockImplementation(name => {
       const inputs = {
         'github-token': 'test-token',
+        'write-job-summary': 'true',
         workflows: '',
         'exclude-workflows': ''
       };
@@ -2223,7 +2224,8 @@ jobs:
       });
       mockCore.getInput.mockImplementation(name => {
         const inputs = {
-          'github-token': 'test-token'
+          'github-token': 'test-token',
+          'write-job-summary': 'true'
         };
         return inputs[name] || '';
       });
@@ -2246,7 +2248,8 @@ jobs:
       });
       mockCore.getInput.mockImplementation(name => {
         const inputs = {
-          'github-token': 'test-token'
+          'github-token': 'test-token',
+          'write-job-summary': 'true'
         };
         return inputs[name] || '';
       });
@@ -2279,6 +2282,73 @@ jobs:
 
       expect(mockCore.warning).toHaveBeenCalledWith(expect.stringContaining('No workflow files found'));
       expect(mockCore.setOutput).toHaveBeenCalledWith('all-passed', true);
+    });
+
+    test('should not write summary when write-job-summary is false', async () => {
+      mockCore.getInput.mockImplementation(name => {
+        const inputs = {
+          'github-token': 'test-token',
+          'write-job-summary': 'false'
+        };
+        return inputs[name] || '';
+      });
+      mockOctokit.rest.repos.getReleaseByTag.mockResolvedValue({
+        data: { immutable: true }
+      });
+
+      await run();
+
+      expect(mockCore.summary.write).not.toHaveBeenCalled();
+    });
+
+    test('should write summary on failure when write-job-summary is on-failure-only', async () => {
+      mockCore.getInput.mockImplementation(name => {
+        const inputs = {
+          'github-token': 'test-token',
+          'write-job-summary': 'on-failure-only'
+        };
+        return inputs[name] || '';
+      });
+      mockOctokit.rest.repos.getReleaseByTag.mockResolvedValue({
+        data: { immutable: false }
+      });
+
+      await run();
+
+      expect(mockCore.summary.write).toHaveBeenCalled();
+    });
+
+    test('should not write summary on success when write-job-summary is on-failure-only', async () => {
+      mockCore.getInput.mockImplementation(name => {
+        const inputs = {
+          'github-token': 'test-token',
+          'write-job-summary': 'on-failure-only'
+        };
+        return inputs[name] || '';
+      });
+      mockOctokit.rest.repos.getReleaseByTag.mockResolvedValue({
+        data: { immutable: true }
+      });
+
+      await run();
+
+      expect(mockCore.summary.write).not.toHaveBeenCalled();
+    });
+
+    test('should fail when write-job-summary input is invalid', async () => {
+      mockCore.getInput.mockImplementation(name => {
+        const inputs = {
+          'github-token': 'test-token',
+          'write-job-summary': 'sometimes'
+        };
+        return inputs[name] || '';
+      });
+
+      await run();
+
+      expect(mockCore.setFailed).toHaveBeenCalledWith(
+        `Invalid 'write-job-summary' input: sometimes. Allowed values: true, false, on-failure-only`
+      );
     });
 
     test('should handle workflows with only first-party actions', async () => {

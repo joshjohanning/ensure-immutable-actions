@@ -24,6 +24,10 @@ inputs:
     description: 'Include first-party actions (actions/*, github/*, octokit/*) in immutability checks. When true, first-party actions are also checked and appear in mutable-actions/immutable-actions outputs in addition to first-party-actions.'
     required: false
     default: 'false'
+  write-job-summary:
+    description: 'Controls job summary output. true: always write summary table, false: never write summary, on-failure-only: write summary only when checks find mutable or unsupported references.'
+    required: false
+    default: 'true'
 
 outputs:
   mutable-actions:
