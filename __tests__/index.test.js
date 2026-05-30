@@ -2214,6 +2214,7 @@ jobs:
       expect(mockCore.setOutput).toHaveBeenCalledWith('all-passed', true);
       expect(mockCore.setOutput).toHaveBeenCalledWith('mutable-actions', expect.stringContaining('[]'));
       expect(mockCore.setFailed).not.toHaveBeenCalled();
+      expect(mockCore.summary.addRaw).toHaveBeenCalledWith('# ✅ Immutable Actions Check - All Passed\n\n');
     });
 
     test('should fail with mutable actions when fail-on-mutable is true', async () => {
@@ -2238,6 +2239,7 @@ jobs:
 
       expect(mockCore.setOutput).toHaveBeenCalledWith('all-passed', false);
       expect(mockCore.setFailed).toHaveBeenCalled();
+      expect(mockCore.summary.addRaw).toHaveBeenCalledWith('# ❌ Immutable Actions Check - Failed\n\n');
     });
 
     test('should not fail with mutable actions when fail-on-mutable is false', async () => {
@@ -2262,6 +2264,7 @@ jobs:
 
       expect(mockCore.setOutput).toHaveBeenCalledWith('all-passed', false);
       expect(mockCore.setFailed).not.toHaveBeenCalled();
+      expect(mockCore.summary.addRaw).toHaveBeenCalledWith('# ⚠️ Immutable Actions Check - Findings Detected\n\n');
     });
 
     test('should fail when github-token is not provided', async () => {
@@ -2394,6 +2397,7 @@ jobs:
       expect(unsupportedOutput).toHaveLength(2);
       expect(mockCore.setFailed).not.toHaveBeenCalled();
       expect(mockCore.warning).toHaveBeenCalledWith(expect.stringContaining('unsupported action reference'));
+      expect(mockCore.summary.addRaw).toHaveBeenCalledWith('# ⚠️ Immutable Actions Check - Findings Detected\n\n');
     });
 
     test('should recurse into local composite actions during action execution', async () => {
