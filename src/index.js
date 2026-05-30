@@ -1437,7 +1437,6 @@ export async function run() {
     core.setOutput('all-passed', mutable.length === 0 && unsupported.length === 0);
 
     const allPassed = mutable.length === 0 && unsupported.length === 0;
-    const hasFindings = mutable.length > 0 || unsupported.length > 0;
     const willFailRun = failOnMutable && mutable.length > 0;
 
     // Create summary with separate tables per workflow
@@ -1449,10 +1448,8 @@ export async function run() {
           summary = summary.addRaw('# ✅ Immutable Actions Check - All Passed\n\n');
         } else if (willFailRun) {
           summary = summary.addRaw('# ❌ Immutable Actions Check - Failed\n\n');
-        } else if (hasFindings) {
-          summary = summary.addRaw('# ⚠️ Immutable Actions Check - Findings Detected\n\n');
         } else {
-          summary = summary.addRaw('# ✅ Immutable Actions Check - All Passed\n\n');
+          summary = summary.addRaw('# ⚠️ Immutable Actions Check - Findings Detected\n\n');
         }
 
         const excludedCount = firstParty.filter(a => a.excluded).length;
