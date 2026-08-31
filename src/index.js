@@ -1075,16 +1075,19 @@ export function normalizeGitRef(ref) {
  */
 export async function resolveSuggestedPin(octokit, action) {
   const { owner, repo } = action;
+  const explicitlyQualifiedBranch = action.ref.startsWith('refs/heads/');
   const ref = normalizeGitRef(action.ref);
 
   let referencedTagExists = false;
-  try {
-    await octokit.rest.git.getRef({ owner, repo, ref: `tags/${ref}` });
-    referencedTagExists = true;
-  } catch (error) {
-    if (error.status !== 404) {
-      core.warning(`Unable to check tag ${owner}/${repo}@${ref}: ${error.message}`);
-      return null;
+  if (!explicitlyQualifiedBranch) {
+    try {
+      await octokit.rest.git.getRef({ owner, repo, ref: `tags/${ref}` });
+      referencedTagExists = true;
+    } catch (error) {
+      if (error.status !== 404) {
+        core.warning(`Unable to check tag ${owner}/${repo}@${ref}: ${error.message}`);
+        return null;
+      }
     }
   }
 
@@ -1128,7 +1131,7 @@ export async function resolveSuggestedPin(octokit, action) {
     }
 
     try {
-      const { data: releases } = await octokit.rest.repos.listReleases({
+      const releases = await octokit.paginate(octokit.rest.repos.listReleases, {
         owner,
         repo,
         per_page: 100

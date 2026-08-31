@@ -26,6 +26,7 @@ const mockCore = {
 
 // Mock octokit instance
 const mockOctokit = {
+  paginate: jest.fn(),
   rest: {
     git: {
       getRef: jest.fn()
@@ -82,13 +83,9 @@ describe('Ensure Immutable Actions', () => {
   beforeEach(() => {
     jest.clearAllMocks();
 
-    // Reset Octokit mock
-    mockOctokit.rest.git.getRef.mockClear();
-    mockOctokit.rest.repos.getReleaseByTag.mockClear();
-    mockOctokit.rest.repos.getLatestRelease.mockClear();
-    mockOctokit.rest.repos.listReleases.mockClear();
-    mockOctokit.rest.repos.getCommit.mockClear();
-    mockOctokit.rest.repos.getContent.mockClear();
+    mockOctokit.paginate.mockReset();
+    mockOctokit.rest.git.getRef.mockReset();
+    MockOctokit.mockReturnValue(mockOctokit);
 
     // Set default inputs
     mockCore.getBooleanInput.mockImplementation(name => {
@@ -1274,6 +1271,28 @@ jobs:
         });
       });
 
+      test('should not resolve an explicitly qualified branch as a same-named tag', async () => {
+        mockOctokit.rest.repos.getLatestRelease.mockResolvedValue({
+          data: { tag_name: 'v2.0.0', prerelease: false }
+        });
+        mockOctokit.rest.repos.getCommit.mockResolvedValue({
+          data: { sha: 'abcdef1234567890abcdef1234567890abcdef12' }
+        });
+
+        await resolveSuggestedPin(mockOctokit, {
+          owner: 'owner',
+          repo: 'repo',
+          ref: 'refs/heads/v1'
+        });
+
+        expect(mockOctokit.rest.git.getRef).not.toHaveBeenCalled();
+        expect(mockOctokit.rest.repos.getCommit).toHaveBeenCalledWith({
+          owner: 'owner',
+          repo: 'repo',
+          ref: 'v2.0.0'
+        });
+      });
+
       test('should use the newest prerelease when no stable release exists', async () => {
         const notFound = Object.assign(new Error('Not Found'), { status: 404 });
         mockOctokit.rest.git.getRef.mockRejectedValue(notFound);
@@ -1281,12 +1300,10 @@ jobs:
           data: { sha: 'fedcba0987654321fedcba0987654321fedcba09' }
         });
         mockOctokit.rest.repos.getLatestRelease.mockRejectedValue(notFound);
-        mockOctokit.rest.repos.listReleases.mockResolvedValue({
-          data: [
-            { tag_name: 'v3.0.0-draft', draft: true, prerelease: true },
-            { tag_name: 'v3.0.0-rc.1', draft: false, prerelease: true }
-          ]
-        });
+        mockOctokit.paginate.mockResolvedValue([
+          { tag_name: 'v3.0.0-draft', draft: true, prerelease: true },
+          { tag_name: 'v3.0.0-rc.1', draft: false, prerelease: true }
+        ]);
 
         await expect(
           resolveSuggestedPin(mockOctokit, {
@@ -1305,7 +1322,7 @@ jobs:
         const notFound = Object.assign(new Error('Not Found'), { status: 404 });
         mockOctokit.rest.git.getRef.mockRejectedValue(notFound);
         mockOctokit.rest.repos.getLatestRelease.mockRejectedValue(notFound);
-        mockOctokit.rest.repos.listReleases.mockResolvedValue({ data: [] });
+        mockOctokit.paginate.mockResolvedValue([]);
 
         await expect(
           resolveSuggestedPin(mockOctokit, {

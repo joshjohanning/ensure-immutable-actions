@@ -142,6 +142,10 @@ Patterns containing `/` match the full workflow path without the `@ref`, which l
 | `all-passed`          | Boolean indicating if all checks passed                                                                      |
 | `workflows-checked`   | List of workflow files that were checked                                                                     |
 
+When pin suggestions are enabled, mutable action objects include `suggestedPin` as either
+`{"sha":"<full-sha>","tag":"<tag>","source":"referenced-release|referenced-tag|latest-release|latest-prerelease"}`
+or `null` when resolution fails. The property is omitted when `suggest-pins` is disabled.
+
 ## Examples
 
 ### Fail on any mutable action
