@@ -2393,6 +2393,9 @@ jobs:
       mockOctokit.rest.repos.getReleaseByTag.mockResolvedValue({
         data: { immutable: false, tag_name: 'v1' }
       });
+      mockOctokit.rest.git.getRef.mockResolvedValue({
+        data: { ref: 'refs/tags/v1' }
+      });
       mockOctokit.rest.repos.getCommit.mockResolvedValue({
         data: { sha: '1234567890abcdef1234567890abcdef12345678' }
       });
