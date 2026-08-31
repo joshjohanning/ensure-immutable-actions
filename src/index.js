@@ -1067,17 +1067,26 @@ export async function resolveRefToCommitSHA(octokit, owner, repo, ref) {
 export async function resolveSuggestedPin(octokit, action) {
   const { owner, repo, ref } = action;
 
-  let referencedSHA;
+  let referencedTagExists = false;
   try {
-    referencedSHA = await resolveRefToCommitSHA(octokit, owner, repo, ref);
+    await octokit.rest.git.getRef({ owner, repo, ref: `tags/${ref}` });
+    referencedTagExists = true;
   } catch (error) {
     if (error.status !== 404) {
-      core.warning(`Unable to resolve suggested pin for ${owner}/${repo}@${ref}: ${error.message}`);
+      core.warning(`Unable to check tag ${owner}/${repo}@${ref}: ${error.message}`);
       return null;
     }
   }
 
-  if (referencedSHA) {
+  if (referencedTagExists) {
+    let referencedSHA;
+    try {
+      referencedSHA = await resolveRefToCommitSHA(octokit, owner, repo, ref);
+    } catch (error) {
+      core.warning(`Unable to resolve tag ${owner}/${repo}@${ref}: ${error.message}`);
+      return null;
+    }
+
     try {
       const { data: matchingRelease } = await octokit.rest.repos.getReleaseByTag({
         owner,

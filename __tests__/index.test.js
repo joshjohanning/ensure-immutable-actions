@@ -27,6 +27,9 @@ const mockCore = {
 // Mock octokit instance
 const mockOctokit = {
   rest: {
+    git: {
+      getRef: jest.fn()
+    },
     repos: {
       getReleaseByTag: jest.fn(),
       getLatestRelease: jest.fn(),
@@ -78,6 +81,7 @@ describe('Ensure Immutable Actions', () => {
     jest.clearAllMocks();
 
     // Reset Octokit mock
+    mockOctokit.rest.git.getRef.mockClear();
     mockOctokit.rest.repos.getReleaseByTag.mockClear();
     mockOctokit.rest.repos.getLatestRelease.mockClear();
     mockOctokit.rest.repos.listReleases.mockClear();
@@ -1161,6 +1165,7 @@ jobs:
       });
 
       test('should resolve the referenced release tag to a commit SHA', async () => {
+        mockOctokit.rest.git.getRef.mockResolvedValue({ data: { ref: 'refs/tags/v1.2.3' } });
         mockOctokit.rest.repos.getCommit.mockResolvedValue({
           data: { sha: '1234567890abcdef1234567890abcdef12345678' }
         });
@@ -1184,6 +1189,7 @@ jobs:
 
       test('should resolve a referenced tag without a GitHub release', async () => {
         const notFound = Object.assign(new Error('Not Found'), { status: 404 });
+        mockOctokit.rest.git.getRef.mockResolvedValue({ data: { ref: 'refs/tags/v1' } });
         mockOctokit.rest.repos.getCommit.mockResolvedValue({
           data: { sha: '1234567890abcdef1234567890abcdef12345678' }
         });
@@ -1205,9 +1211,10 @@ jobs:
 
       test('should fall back to the latest stable release for a branch reference', async () => {
         const notFound = Object.assign(new Error('Not Found'), { status: 404 });
-        mockOctokit.rest.repos.getCommit
-          .mockRejectedValueOnce(notFound)
-          .mockResolvedValueOnce({ data: { sha: 'abcdef1234567890abcdef1234567890abcdef12' } });
+        mockOctokit.rest.git.getRef.mockRejectedValue(notFound);
+        mockOctokit.rest.repos.getCommit.mockResolvedValue({
+          data: { sha: 'abcdef1234567890abcdef1234567890abcdef12' }
+        });
         mockOctokit.rest.repos.getLatestRelease.mockResolvedValue({
           data: { tag_name: 'v2.0.0', prerelease: false }
         });
@@ -1223,13 +1230,20 @@ jobs:
           tag: 'v2.0.0',
           source: 'latest-release'
         });
+        expect(mockOctokit.rest.repos.getCommit).toHaveBeenCalledTimes(1);
+        expect(mockOctokit.rest.repos.getCommit).toHaveBeenCalledWith({
+          owner: 'owner',
+          repo: 'repo',
+          ref: 'v2.0.0'
+        });
       });
 
       test('should use the newest prerelease when no stable release exists', async () => {
         const notFound = Object.assign(new Error('Not Found'), { status: 404 });
-        mockOctokit.rest.repos.getCommit
-          .mockRejectedValueOnce(notFound)
-          .mockResolvedValueOnce({ data: { sha: 'fedcba0987654321fedcba0987654321fedcba09' } });
+        mockOctokit.rest.git.getRef.mockRejectedValue(notFound);
+        mockOctokit.rest.repos.getCommit.mockResolvedValue({
+          data: { sha: 'fedcba0987654321fedcba0987654321fedcba09' }
+        });
         mockOctokit.rest.repos.getLatestRelease.mockRejectedValue(notFound);
         mockOctokit.rest.repos.listReleases.mockResolvedValue({
           data: [
@@ -1253,7 +1267,7 @@ jobs:
 
       test('should warn and return null when no releases are available', async () => {
         const notFound = Object.assign(new Error('Not Found'), { status: 404 });
-        mockOctokit.rest.repos.getCommit.mockRejectedValue(notFound);
+        mockOctokit.rest.git.getRef.mockRejectedValue(notFound);
         mockOctokit.rest.repos.getLatestRelease.mockRejectedValue(notFound);
         mockOctokit.rest.repos.listReleases.mockResolvedValue({ data: [] });
 
@@ -1268,7 +1282,7 @@ jobs:
       });
 
       test('should warn and return null on an API failure', async () => {
-        mockOctokit.rest.repos.getCommit.mockRejectedValue(Object.assign(new Error('Forbidden'), { status: 403 }));
+        mockOctokit.rest.git.getRef.mockRejectedValue(Object.assign(new Error('Forbidden'), { status: 403 }));
 
         await expect(
           resolveSuggestedPin(mockOctokit, {
@@ -1277,7 +1291,7 @@ jobs:
             ref: 'main'
           })
         ).resolves.toBeNull();
-        expect(mockCore.warning).toHaveBeenCalledWith('Unable to resolve suggested pin for owner/repo@main: Forbidden');
+        expect(mockCore.warning).toHaveBeenCalledWith('Unable to check tag owner/repo@main: Forbidden');
       });
     });
 
