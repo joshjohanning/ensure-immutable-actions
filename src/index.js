@@ -1080,15 +1080,16 @@ export function normalizeReleaseTag(ref) {
  * Resolve a recommended immutable pin for a mutable action
  * @param {Octokit} octokit - Octokit instance
  * @param {Object} action - Mutable action reference
+ * @param {Object} immutabilityResult - Existing release lookup result
  * @returns {Promise<Object|null>} Suggested pin details or null when unavailable
  */
-export async function resolveSuggestedPin(octokit, action) {
+export async function resolveSuggestedPin(octokit, action, immutabilityResult = {}) {
   const { owner, repo } = action;
   const explicitlyQualifiedBranch = action.ref.startsWith('refs/heads/');
   const ref = normalizeGitRef(action.ref);
 
-  let referencedTagExists = false;
-  if (!explicitlyQualifiedBranch) {
+  let referencedTagExists = immutabilityResult.releaseFound === true;
+  if (!explicitlyQualifiedBranch && !referencedTagExists) {
     try {
       await octokit.rest.git.getRef({ owner, repo, ref: `tags/${ref}` });
       referencedTagExists = true;
@@ -1109,24 +1110,14 @@ export async function resolveSuggestedPin(octokit, action) {
       return null;
     }
 
-    try {
-      const { data: matchingRelease } = await octokit.rest.repos.getReleaseByTag({
-        owner,
-        repo,
-        tag: ref
-      });
+    if (immutabilityResult.releaseFound) {
       return {
         sha: referencedSHA,
-        tag: matchingRelease.tag_name || ref,
+        tag: ref,
         source: 'referenced-release'
       };
-    } catch (error) {
-      if (error.status !== 404) {
-        core.warning(`Unable to check release for ${owner}/${repo}@${ref}: ${error.message}`);
-        return null;
-      }
-      return { sha: referencedSHA, tag: ref, source: 'referenced-tag' };
     }
+    return { sha: referencedSHA, tag: ref, source: 'referenced-tag' };
   }
 
   let release;
@@ -1328,7 +1319,7 @@ export async function checkAllActions(octokit, actions, includeFirstParty = fals
     if (!result.immutable && suggestPins) {
       const suggestionKey = `${action.owner}/${action.repo}@${action.ref}`;
       if (!suggestedPinCache.has(suggestionKey)) {
-        suggestedPinCache.set(suggestionKey, await resolveSuggestedPin(octokit, action));
+        suggestedPinCache.set(suggestionKey, await resolveSuggestedPin(octokit, action, result));
       }
       result.suggestedPin = suggestedPinCache.get(suggestionKey);
     }

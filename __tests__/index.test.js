@@ -1180,11 +1180,15 @@ jobs:
         });
 
         await expect(
-          resolveSuggestedPin(mockOctokit, {
-            owner: 'owner',
-            repo: 'repo',
-            ref: 'v1.2.3'
-          })
+          resolveSuggestedPin(
+            mockOctokit,
+            {
+              owner: 'owner',
+              repo: 'repo',
+              ref: 'v1.2.3'
+            },
+            { releaseFound: true }
+          )
         ).resolves.toEqual({
           sha: '1234567890abcdef1234567890abcdef12345678',
           tag: 'v1.2.3',
@@ -1210,22 +1214,23 @@ jobs:
           data: { tag_name: 'v1' }
         });
 
-        await resolveSuggestedPin(mockOctokit, {
-          owner: 'owner',
-          repo: 'repo',
-          ref: 'refs/tags/v1'
-        });
+        await resolveSuggestedPin(
+          mockOctokit,
+          {
+            owner: 'owner',
+            repo: 'repo',
+            ref: 'refs/tags/v1'
+          },
+          { releaseFound: true }
+        );
 
-        expect(mockOctokit.rest.git.getRef).toHaveBeenCalledWith({
-          owner: 'owner',
-          repo: 'repo',
-          ref: 'tags/v1'
-        });
+        expect(mockOctokit.rest.git.getRef).not.toHaveBeenCalled();
         expect(mockOctokit.rest.repos.getCommit).toHaveBeenCalledWith({
           owner: 'owner',
           repo: 'repo',
           ref: 'v1'
         });
+        expect(mockOctokit.rest.repos.getReleaseByTag).not.toHaveBeenCalled();
       });
 
       test('should resolve a referenced tag without a GitHub release', async () => {
@@ -2511,6 +2516,7 @@ jobs:
         tag: 'v1',
         source: 'referenced-release'
       });
+      expect(mockOctokit.rest.repos.getReleaseByTag).toHaveBeenCalledTimes(1);
       expect(mockCore.summary.addRaw).toHaveBeenCalledWith(expect.stringContaining('| Suggested Pin |'));
       expect(mockCore.summary.addRaw).toHaveBeenCalledWith(
         expect.stringContaining('`third-party/action@1234567890abcdef1234567890abcdef12345678` # v1')

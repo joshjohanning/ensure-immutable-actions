@@ -214,9 +214,6 @@ When enabled, the action first resolves the referenced tag itself. For branch-li
 8. **Optionally Fails**: If `fail-on-mutable` is true, fails the workflow when mutable actions are found
 
 > [!NOTE]
-> This action always checks immutability against the github.com API since that is the provenance for marketplace actions. It is not designed for use with GHES API URLs.
-
-> [!NOTE]
 > Recursion into remote composite actions and reusable workflows uses the `github-token` to fetch file contents via the GitHub API. The default `GITHUB_TOKEN` only has `contents: read` access to the triggering repository — remote references in private or internal repositories may not be readable and can be reported as unsupported in the action output/summary. To enable full recursion across private repos, provide a token with broader `contents: read` scope, such as a GitHub App token:
 >
 > ```yaml
