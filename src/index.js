@@ -308,9 +308,10 @@ export function extractActionsFromLocalAction(
     return [createUnsupportedLocalAction(uses, metadata, 'Unsupported local action: path resolves outside workspace')];
   }
 
-  options.referencedLocalActionDirs?.add(path.resolve(localActionDir));
+  const canonicalLocalActionDir = fs.existsSync(localActionDir) ? fs.realpathSync(localActionDir) : localActionDir;
+  options.referencedLocalActionDirs?.add(canonicalLocalActionDir);
 
-  if (visitedLocalActions.has(localActionDir)) {
+  if (visitedLocalActions.has(canonicalLocalActionDir)) {
     core.warning(`Skipping recursive local action cycle: ${uses}`);
     return [];
   }
@@ -318,6 +319,14 @@ export function extractActionsFromLocalAction(
   const metadataFile = findLocalActionMetadataFile(localActionDir);
   if (!metadataFile) {
     return [createUnsupportedLocalAction(uses, metadata, 'Unsupported local action: action.yml not found')];
+  }
+
+  const canonicalWorkspaceDir = fs.realpathSync(path.resolve(workspaceDir));
+  const canonicalMetadataFile = fs.realpathSync(metadataFile);
+  if (!isPathWithinDirectory(canonicalWorkspaceDir, canonicalMetadataFile)) {
+    return [
+      createUnsupportedLocalAction(uses, metadata, 'Unsupported local action: metadata resolves outside workspace')
+    ];
   }
 
   try {
@@ -336,7 +345,7 @@ export function extractActionsFromLocalAction(
 
     const nestedActions = [];
     const nextVisitedLocalActions = new Set(visitedLocalActions);
-    nextVisitedLocalActions.add(localActionDir);
+    nextVisitedLocalActions.add(canonicalLocalActionDir);
 
     for (const step of actionDefinition?.runs?.steps || []) {
       if (step?.uses) {
@@ -1471,7 +1480,7 @@ export async function run() {
       allActions.push(...actions);
     }
 
-    const rootActionDir = path.resolve(workspaceDir);
+    const rootActionDir = fs.realpathSync(path.resolve(workspaceDir));
     if (rootActionMetadataFile && !referencedLocalActionDirs.has(rootActionDir)) {
       const rootActionMetadataName = path.basename(rootActionMetadataFile);
       core.info(`Parsing root action metadata: ${rootActionMetadataName}`);

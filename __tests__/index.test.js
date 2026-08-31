@@ -697,6 +697,52 @@ runs:
       fs.rmSync(outsideDir, { recursive: true, force: true });
     });
 
+    test('should not read symlinked action metadata outside the workspace', () => {
+      const workspaceDir = fs.mkdtempSync('/tmp/test-workflow-metadata-symlink-');
+      const outsideDir = fs.mkdtempSync('/tmp/test-workflow-metadata-symlink-outside-');
+      const workflowsDir = path.join(workspaceDir, '.github', 'workflows');
+      const localActionDir = path.join(workspaceDir, 'local-action');
+      const outsideMetadata = path.join(outsideDir, 'action.yml');
+
+      fs.mkdirSync(workflowsDir, { recursive: true });
+      fs.mkdirSync(localActionDir);
+      fs.writeFileSync(
+        path.join(workflowsDir, 'ci.yml'),
+        `
+name: CI
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./local-action
+`
+      );
+      fs.writeFileSync(
+        outsideMetadata,
+        `
+name: Outside Composite
+runs:
+  using: composite
+  steps:
+    - uses: owner/action@v1
+`
+      );
+      fs.symlinkSync(outsideMetadata, path.join(localActionDir, 'action.yml'), 'file');
+
+      expect(extractActionsFromWorkflow(path.join(workflowsDir, 'ci.yml'), workspaceDir)).toEqual([
+        expect.objectContaining({
+          uses: './local-action',
+          supported: false,
+          unsupportedType: 'local-action',
+          message: 'Unsupported local action: metadata resolves outside workspace'
+        })
+      ]);
+
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+      fs.rmSync(outsideDir, { recursive: true, force: true });
+    });
+
     test('should recurse into nested local composite actions', () => {
       const workspaceDir = '/tmp/test-workflow-nested-local-composite';
       const workflowsDir = path.join(workspaceDir, '.github', 'workflows');
@@ -2638,6 +2684,62 @@ runs:
     - uses: owner/action@1234567890abcdef1234567890abcdef12345678
 `
       );
+      mockOctokit.rest.repos.getContent.mockResolvedValue({
+        data: {
+          type: 'file',
+          encoding: 'base64',
+          content: Buffer.from(
+            `
+name: Nested Node Action
+runs:
+  using: node24
+  main: dist/index.js
+`,
+            'utf8'
+          ).toString('base64')
+        }
+      });
+
+      await run();
+
+      const checkedCall = mockCore.setOutput.mock.calls.find(c => c[0] === 'workflows-checked');
+      expect(JSON.parse(checkedCall[1])).toEqual(['ci.yml']);
+      const immutableCall = mockCore.setOutput.mock.calls.find(c => c[0] === 'immutable-actions');
+      const immutableOutput = JSON.parse(immutableCall[1]);
+      expect(immutableOutput).toHaveLength(1);
+      expect(immutableOutput[0]).toMatchObject({
+        uses: 'owner/action@1234567890abcdef1234567890abcdef12345678',
+        sourceWorkflowFile: 'ci.yml'
+      });
+      expect(mockCore.info).toHaveBeenCalledWith(
+        'Root action metadata already scanned through a local action reference'
+      );
+    });
+
+    test('should not scan root action metadata twice when referenced through a symlink alias', async () => {
+      fs.writeFileSync(
+        path.join(testWorkflowsDir, 'ci.yml'),
+        `
+name: CI
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./root-alias
+`
+      );
+      fs.writeFileSync(
+        path.join(testWorkspaceDir, 'action.yml'),
+        `
+name: Root Composite
+runs:
+  using: composite
+  steps:
+    - uses: owner/action@1234567890abcdef1234567890abcdef12345678
+`
+      );
+      fs.symlinkSync('.', path.join(testWorkspaceDir, 'root-alias'), 'dir');
       mockOctokit.rest.repos.getContent.mockResolvedValue({
         data: {
           type: 'file',
