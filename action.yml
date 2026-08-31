@@ -41,7 +41,7 @@ outputs:
   all-passed:
     description: 'Boolean indicating if all checks passed'
   workflows-checked:
-    description: 'List of workflow and repository-root action metadata files that were checked as scan entrypoints'
+    description: 'List of workflow and repository-root action metadata files that were checked as scan entrypoints. Root metadata uses a ./ prefix to distinguish it from same-named workflows.'
 
 runs:
   using: 'node24'

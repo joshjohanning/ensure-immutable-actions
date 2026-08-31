@@ -26,6 +26,7 @@ The scan covers:
 - **Remote composite actions and reusable workflows** — recursively fetches and scans nested `uses` references from external repositories
 
 If a selected workflow already reaches the root action through a local reference such as `uses: ./`, the root metadata is not scanned a second time.
+When root metadata is scanned separately, it appears as `./action.yml` or `./action.yaml` in `workflows-checked` and report headings so it cannot collide with a same-named workflow.
 
 ## Example Output
 
@@ -134,14 +135,14 @@ Patterns containing `/` match the full workflow path without the `@ref`, which l
 
 ## Outputs
 
-| Output                | Description                                                                                                  |
-| --------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `mutable-actions`     | JSON array of actions using mutable releases                                                                 |
-| `immutable-actions`   | JSON array of actions using immutable releases                                                               |
-| `unsupported-actions` | JSON array of action references that were found but not analyzed because their reference type is unsupported |
-| `first-party-actions` | JSON array of all first-party actions with `allowed` and `message` fields indicating their status.           |
-| `all-passed`          | Boolean indicating if all checks passed                                                                      |
-| `workflows-checked`   | List of workflow and repository-root action metadata files checked as scan entrypoints                       |
+| Output                | Description                                                                                                                                                           |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mutable-actions`     | JSON array of actions using mutable releases                                                                                                                          |
+| `immutable-actions`   | JSON array of actions using immutable releases                                                                                                                        |
+| `unsupported-actions` | JSON array of action references that were found but not analyzed because their reference type is unsupported                                                          |
+| `first-party-actions` | JSON array of all first-party actions with `allowed` and `message` fields indicating their status.                                                                    |
+| `all-passed`          | Boolean indicating if all checks passed                                                                                                                               |
+| `workflows-checked`   | List of workflow and repository-root action metadata files checked as scan entrypoints. Root metadata uses a `./` prefix to distinguish it from same-named workflows. |
 
 ## Examples
 

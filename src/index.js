@@ -319,6 +319,7 @@ export function extractActionsFromLocalAction(
             workspaceDir,
             baseDir: localActionDir,
             visitedLocalActions: nextVisitedLocalActions,
+            excludeWorkflowPatterns: options.excludeWorkflowPatterns,
             referencedLocalActionDirs: options.referencedLocalActionDirs
           }
         );
@@ -338,9 +339,10 @@ export function extractActionsFromLocalAction(
 /**
  * Extract nested references from repository-root action metadata
  * @param {string} workspaceDir - Repository workspace root
+ * @param {Object} options - Root action extraction options
  * @returns {Array} Extracted nested action references
  */
-export function extractActionsFromRootAction(workspaceDir) {
+export function extractActionsFromRootAction(workspaceDir, options = {}) {
   const metadataFile = findLocalActionMetadataFile(workspaceDir);
   if (!metadataFile) {
     return [];
@@ -350,14 +352,17 @@ export function extractActionsFromRootAction(workspaceDir) {
   return extractActionsFromLocalAction(
     './',
     {
-      workflowFile: metadataName,
+      workflowFile: `./${metadataName}`,
       entrypointUses: './',
-      sourceWorkflowFile: metadataName
+      sourceWorkflowFile: `./${metadataName}`
     },
     workspaceDir,
     workspaceDir,
     new Set(),
-    { reportUnsupported: false }
+    {
+      reportUnsupported: false,
+      excludeWorkflowPatterns: options.excludeWorkflowPatterns
+    }
   );
 }
 
@@ -487,6 +492,7 @@ export function addParsedAction(actions, uses, metadata, options = {}) {
     }
     actions.push(
       ...extractActionsFromLocalAction(uses, metadata, workspaceDir, baseDir, visitedLocalActions, {
+        excludeWorkflowPatterns,
         referencedLocalActionDirs
       })
     );
@@ -1058,8 +1064,10 @@ export function formatSourceLocationLink(sourceLocation, repository, sha) {
     return locationText;
   }
 
-  const workflowPath = `.github/workflows/${sourceLocation.workflowFile}`;
-  const url = `https://github.com/${repository}/blob/${sha}/${workflowPath}`;
+  const sourcePath = sourceLocation.workflowFile.startsWith('./')
+    ? sourceLocation.workflowFile.slice(2)
+    : `.github/workflows/${sourceLocation.workflowFile}`;
+  const url = `https://github.com/${repository}/blob/${sha}/${sourcePath}`;
   return `[${locationText}](${url})`;
 }
 
@@ -1438,10 +1446,10 @@ export async function run() {
     if (rootActionMetadataFile && !referencedLocalActionDirs.has(rootActionDir)) {
       const rootActionMetadataName = path.basename(rootActionMetadataFile);
       core.info(`Parsing root action metadata: ${rootActionMetadataName}`);
-      const actions = extractActionsFromRootAction(workspaceDir);
+      const actions = extractActionsFromRootAction(workspaceDir, { excludeWorkflowPatterns });
       core.info(`  Found ${actions.length} action(s)`);
       allActions.push(...actions);
-      checkedFiles.push(rootActionMetadataName);
+      checkedFiles.push(`./${rootActionMetadataName}`);
     } else if (rootActionMetadataFile) {
       core.info('Root action metadata already scanned through a local action reference');
     }
