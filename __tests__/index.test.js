@@ -333,6 +333,34 @@ runs:
       fs.rmSync(workspaceDir, { recursive: true, force: true });
     });
 
+    test('should report malformed root metadata as unsupported', () => {
+      const workspaceDir = '/tmp/test-root-malformed-action';
+      fs.mkdirSync(workspaceDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(workspaceDir, 'action.yml'),
+        `
+name: Root Composite
+runs:
+  using: composite
+  steps: [
+`
+      );
+
+      expect(extractActionsFromRootAction(workspaceDir)).toEqual([
+        expect.objectContaining({
+          uses: './',
+          workflowFile: './action.yml',
+          sourceWorkflowFile: './action.yml',
+          supported: false,
+          unsupportedType: 'local-action',
+          message: 'Unsupported local action: failed to parse action.yml'
+        })
+      ]);
+      expect(mockCore.warning).toHaveBeenCalledWith(expect.stringContaining('Failed to parse local action'));
+
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+    });
+
     test('should apply workflow exclusions during root action traversal', () => {
       const workspaceDir = '/tmp/test-root-action-exclusions';
       const workflowsDir = path.join(workspaceDir, '.github', 'workflows');

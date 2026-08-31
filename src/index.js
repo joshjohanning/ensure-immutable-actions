@@ -278,9 +278,6 @@ export function extractActionsFromLocalAction(
 ) {
   const localActionDir = resolveLocalActionDirectory(uses, workspaceDir, baseDir);
   if (!localActionDir) {
-    if (options.reportUnsupported === false) {
-      return [];
-    }
     return [createUnsupportedLocalAction(uses, metadata, 'Unsupported local action: path resolves outside workspace')];
   }
 
@@ -293,9 +290,6 @@ export function extractActionsFromLocalAction(
 
   const metadataFile = findLocalActionMetadataFile(localActionDir);
   if (!metadataFile) {
-    if (options.reportUnsupported === false) {
-      return [];
-    }
     return [createUnsupportedLocalAction(uses, metadata, 'Unsupported local action: action.yml not found')];
   }
 
@@ -305,7 +299,7 @@ export function extractActionsFromLocalAction(
     const actionType = actionDefinition?.runs?.using;
 
     if (actionType !== 'composite') {
-      if (options.reportUnsupported === false) {
+      if (options.reportNonCompositeUnsupported === false) {
         return [];
       }
       return [
@@ -340,9 +334,6 @@ export function extractActionsFromLocalAction(
     return nestedActions;
   } catch (error) {
     core.warning(`Failed to parse local action ${metadataFile}: ${error.message}`);
-    if (options.reportUnsupported === false) {
-      return [];
-    }
     return [createUnsupportedLocalAction(uses, metadata, 'Unsupported local action: failed to parse action.yml')];
   }
 }
@@ -371,7 +362,7 @@ export function extractActionsFromRootAction(workspaceDir, options = {}) {
     workspaceDir,
     new Set(),
     {
-      reportUnsupported: false,
+      reportNonCompositeUnsupported: false,
       excludeWorkflowPatterns: options.excludeWorkflowPatterns
     }
   );
