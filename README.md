@@ -42,11 +42,11 @@ The action generates a report organized by workflow, making it easy to identify 
 
 **Actions:** 0 excluded, 1 immutable, 2 mutable
 
-| Action                                                                             | Status       | Suggested Pin                                       | Message                             |
-| ---------------------------------------------------------------------------------- | ------------ | --------------------------------------------------- | ----------------------------------- |
-| [owner/secure-action@v2.0.0](https://github.com/owner/secure-action/tree/v2.0.0)   | ✅ Immutable |                                                     | Immutable release                   |
-| [owner/mutable-action@v1](https://github.com/owner/mutable-action/tree/v1)         | ❌ Mutable   | `0123456789abcdef0123456789abcdef01234567` # v1.2.3 | No release found for this reference |
-| [owner/another-action@v2.1.0](https://github.com/owner/another-action/tree/v2.1.0) | ❌ Mutable   | `89abcdef0123456789abcdef0123456789abcdef` # v2.1.0 | Mutable release                     |
+| Action                                                                             | Status       | Suggested Pin                                                            | Message                             |
+| ---------------------------------------------------------------------------------- | ------------ | ------------------------------------------------------------------------ | ----------------------------------- |
+| [owner/secure-action@v2.0.0](https://github.com/owner/secure-action/tree/v2.0.0)   | ✅ Immutable |                                                                          | Immutable release                   |
+| [owner/mutable-action@v1](https://github.com/owner/mutable-action/tree/v1)         | ❌ Mutable   | `owner/mutable-action@0123456789abcdef0123456789abcdef01234567` # v1.2.3 | No release found for this reference |
+| [owner/another-action@v2.1.0](https://github.com/owner/another-action/tree/v2.1.0) | ❌ Mutable   | `owner/another-action@89abcdef0123456789abcdef0123456789abcdef` # v2.1.0 | Mutable release                     |
 
 ## Usage
 

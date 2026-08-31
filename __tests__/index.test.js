@@ -1148,10 +1148,15 @@ jobs:
       test('should format a suggested pin for the job summary', () => {
         expect(
           formatSuggestedPin({
-            sha: '1234567890abcdef1234567890abcdef12345678',
-            tag: 'v1.2.3'
+            owner: 'owner',
+            repo: 'repo',
+            actionPath: 'path',
+            suggestedPin: {
+              sha: '1234567890abcdef1234567890abcdef12345678',
+              tag: 'v1.2.3'
+            }
           })
-        ).toBe('`1234567890abcdef1234567890abcdef12345678` # v1.2.3');
+        ).toBe('`owner/repo/path@1234567890abcdef1234567890abcdef12345678` # v1.2.3');
         expect(formatSuggestedPin(null)).toBe('');
       });
 
@@ -1172,6 +1177,27 @@ jobs:
         ).resolves.toEqual({
           sha: '1234567890abcdef1234567890abcdef12345678',
           tag: 'v1.2.3',
+          source: 'referenced-release'
+        });
+        expect(mockOctokit.rest.repos.getLatestRelease).not.toHaveBeenCalled();
+      });
+
+      test('should resolve a referenced tag without a GitHub release', async () => {
+        const notFound = Object.assign(new Error('Not Found'), { status: 404 });
+        mockOctokit.rest.repos.getCommit.mockResolvedValue({
+          data: { sha: '1234567890abcdef1234567890abcdef12345678' }
+        });
+        mockOctokit.rest.repos.getReleaseByTag.mockRejectedValue(notFound);
+
+        await expect(
+          resolveSuggestedPin(mockOctokit, {
+            owner: 'owner',
+            repo: 'repo',
+            ref: 'v1'
+          })
+        ).resolves.toEqual({
+          sha: '1234567890abcdef1234567890abcdef12345678',
+          tag: 'v1',
           source: 'referenced-tag'
         });
         expect(mockOctokit.rest.repos.getLatestRelease).not.toHaveBeenCalled();
@@ -1206,7 +1232,10 @@ jobs:
           .mockResolvedValueOnce({ data: { sha: 'fedcba0987654321fedcba0987654321fedcba09' } });
         mockOctokit.rest.repos.getLatestRelease.mockRejectedValue(notFound);
         mockOctokit.rest.repos.listReleases.mockResolvedValue({
-          data: [{ tag_name: 'v3.0.0-rc.1', prerelease: true }]
+          data: [
+            { tag_name: 'v3.0.0-draft', draft: true, prerelease: true },
+            { tag_name: 'v3.0.0-rc.1', draft: false, prerelease: true }
+          ]
         });
 
         await expect(
@@ -2363,11 +2392,11 @@ jobs:
       expect(JSON.parse(mutableCall[1])[0].suggestedPin).toEqual({
         sha: '1234567890abcdef1234567890abcdef12345678',
         tag: 'v1',
-        source: 'referenced-tag'
+        source: 'referenced-release'
       });
       expect(mockCore.summary.addRaw).toHaveBeenCalledWith(expect.stringContaining('| Suggested Pin |'));
       expect(mockCore.summary.addRaw).toHaveBeenCalledWith(
-        expect.stringContaining('`1234567890abcdef1234567890abcdef12345678` # v1')
+        expect.stringContaining('`third-party/action@1234567890abcdef1234567890abcdef12345678` # v1')
       );
     });
 

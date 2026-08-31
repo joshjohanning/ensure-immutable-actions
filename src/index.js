@@ -1067,18 +1067,34 @@ export async function resolveRefToCommitSHA(octokit, owner, repo, ref) {
 export async function resolveSuggestedPin(octokit, action) {
   const { owner, repo, ref } = action;
 
+  let referencedSHA;
   try {
-    const sha = await resolveRefToCommitSHA(octokit, owner, repo, ref);
-    const { data: matchingRelease } = await octokit.rest.repos.getReleaseByTag({
-      owner,
-      repo,
-      tag: ref
-    });
-    return { sha, tag: matchingRelease.tag_name || ref, source: 'referenced-tag' };
+    referencedSHA = await resolveRefToCommitSHA(octokit, owner, repo, ref);
   } catch (error) {
     if (error.status !== 404) {
       core.warning(`Unable to resolve suggested pin for ${owner}/${repo}@${ref}: ${error.message}`);
       return null;
+    }
+  }
+
+  if (referencedSHA) {
+    try {
+      const { data: matchingRelease } = await octokit.rest.repos.getReleaseByTag({
+        owner,
+        repo,
+        tag: ref
+      });
+      return {
+        sha: referencedSHA,
+        tag: matchingRelease.tag_name || ref,
+        source: 'referenced-release'
+      };
+    } catch (error) {
+      if (error.status !== 404) {
+        core.warning(`Unable to check release for ${owner}/${repo}@${ref}: ${error.message}`);
+        return null;
+      }
+      return { sha: referencedSHA, tag: ref, source: 'referenced-tag' };
     }
   }
 
@@ -1096,9 +1112,9 @@ export async function resolveSuggestedPin(octokit, action) {
       const { data: releases } = await octokit.rest.repos.listReleases({
         owner,
         repo,
-        per_page: 1
+        per_page: 100
       });
-      release = releases[0];
+      release = releases.find(candidate => !candidate.draft && candidate.prerelease);
     } catch (listError) {
       core.warning(`Unable to list releases for ${owner}/${repo}: ${listError.message}`);
       return null;
@@ -1125,14 +1141,17 @@ export async function resolveSuggestedPin(octokit, action) {
 
 /**
  * Format a suggested pin for the job summary
- * @param {Object|null} suggestedPin - Suggested pin details
+ * @param {Object} action - Action reference
  * @returns {string} Markdown table cell value
  */
-export function formatSuggestedPin(suggestedPin) {
-  if (!suggestedPin) {
+export function formatSuggestedPin(action) {
+  if (!action?.suggestedPin) {
     return '';
   }
-  return `\`${suggestedPin.sha}\` # ${suggestedPin.tag}`;
+  const repositoryPath = action.actionPath
+    ? `${action.owner}/${action.repo}/${action.actionPath}`
+    : `${action.owner}/${action.repo}`;
+  return `\`${repositoryPath}@${action.suggestedPin.sha}\` # ${action.suggestedPin.tag}`;
 }
 
 /**
@@ -1200,6 +1219,7 @@ export async function checkReleaseImmutability(octokit, owner, repo, ref) {
  * @param {Octokit} octokit - Octokit instance
  * @param {Array} actions - Array of action references
  * @param {boolean} includeFirstParty - Whether to include first-party actions in checks
+ * @param {boolean} suggestPins - Whether to resolve suggested immutable pins
  * @returns {Promise<Object>} { mutable: Array, immutable: Array, unsupported: Array, firstParty: Array, byWorkflow: Object }
  */
 export async function checkAllActions(octokit, actions, includeFirstParty = false, suggestPins = true) {
@@ -1611,7 +1631,7 @@ export async function run() {
             const actionRef = formatActionReference(action.owner, action.repo, action.ref, action.actionPath);
             const message = formatSummaryMessage(action.message, action.sourceLocations, true);
             markdownTable += suggestPins
-              ? `| ${actionRef} | ❌ Mutable | ${formatSuggestedPin(action.suggestedPin)} | ${message} |\n`
+              ? `| ${actionRef} | ❌ Mutable | ${formatSuggestedPin(action)} | ${message} |\n`
               : `| ${actionRef} | ❌ Mutable | ${message} |\n`;
           }
           for (const action of workflowData.unsupported) {
