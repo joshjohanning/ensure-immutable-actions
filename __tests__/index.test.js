@@ -45,6 +45,7 @@ const {
   default: run,
   parseActionReference,
   shouldExcludeAction,
+  extractActionsFromRootAction,
   extractActionsFromWorkflow,
   expandActionReferences,
   expandRemoteReference,
@@ -58,6 +59,7 @@ const {
   getWorkflowFiles,
   isExcludedWorkflow,
   isLocalReusableWorkflowReference,
+  isPathWithinDirectory,
   isReusableWorkflowReference,
   resolveLocalActionDirectory,
   resolveLocalReusableWorkflowPath,
@@ -250,6 +252,23 @@ describe('Ensure Immutable Actions', () => {
       fs.rmSync(workspaceDir, { recursive: true, force: true });
       fs.rmSync(outsideDir, { recursive: true, force: true });
     });
+
+    test('should reject reusable workflow symlinks that escape the workspace', () => {
+      const workspaceDir = fs.mkdtempSync('/tmp/test-resolve-workflow-symlink-');
+      const outsideDir = fs.mkdtempSync('/tmp/test-resolve-workflow-symlink-outside-');
+      const workflowsDir = path.join(workspaceDir, '.github', 'workflows');
+      const outsideWorkflow = path.join(outsideDir, 'reusable.yml');
+      const linkedWorkflow = path.join(workflowsDir, 'reusable.yml');
+
+      fs.mkdirSync(workflowsDir, { recursive: true });
+      fs.writeFileSync(outsideWorkflow, 'name: Outside Workflow');
+      fs.symlinkSync(outsideWorkflow, linkedWorkflow, 'file');
+
+      expect(resolveLocalReusableWorkflowPath('./.github/workflows/reusable.yml', workspaceDir)).toBeNull();
+
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+      fs.rmSync(outsideDir, { recursive: true, force: true });
+    });
   });
 
   describe('resolveLocalActionDirectory', () => {
@@ -263,6 +282,161 @@ describe('Ensure Immutable Actions', () => {
       const resolved = resolveLocalActionDirectory('./', workspaceDir, workspaceDir);
 
       expect(resolved).toBe(rootActionDir);
+
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+    });
+
+    test('should reject local action paths outside the workspace', () => {
+      const workspaceDir = '/tmp/test-resolve-local-action-traversal';
+      const outsideDir = '/tmp/test-resolve-local-action-traversal-outside';
+
+      fs.mkdirSync(workspaceDir, { recursive: true });
+      fs.mkdirSync(outsideDir, { recursive: true });
+      fs.writeFileSync(path.join(outsideDir, 'action.yml'), 'name: Outside Action');
+
+      expect(
+        resolveLocalActionDirectory('./../test-resolve-local-action-traversal-outside', workspaceDir, workspaceDir)
+      ).toBeNull();
+
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+      fs.rmSync(outsideDir, { recursive: true, force: true });
+    });
+
+    test('should resolve local actions when the workspace is a filesystem root', () => {
+      const actionDir = fs.mkdtempSync('/tmp/test-resolve-root-workspace-');
+      const workspaceRoot = path.parse(actionDir).root;
+      const uses = `.${actionDir}`;
+
+      expect(isPathWithinDirectory(workspaceRoot, actionDir)).toBe(true);
+      expect(resolveLocalActionDirectory(uses, workspaceRoot, workspaceRoot)).toBe(actionDir);
+
+      fs.rmSync(actionDir, { recursive: true, force: true });
+    });
+
+    test('should reject local action symlinks that escape the workspace', () => {
+      const workspaceDir = fs.mkdtempSync('/tmp/test-resolve-local-action-symlink-');
+      const outsideDir = fs.mkdtempSync('/tmp/test-resolve-local-action-symlink-outside-');
+      const linkedActionDir = path.join(workspaceDir, 'linked-action');
+
+      fs.writeFileSync(path.join(outsideDir, 'action.yml'), 'name: Outside Action');
+      fs.symlinkSync(outsideDir, linkedActionDir, 'dir');
+
+      expect(resolveLocalActionDirectory('./linked-action', workspaceDir, workspaceDir)).toBeNull();
+
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+      fs.rmSync(outsideDir, { recursive: true, force: true });
+    });
+  });
+
+  describe('extractActionsFromRootAction', () => {
+    test('should extract references from root action.yaml metadata', () => {
+      const workspaceDir = '/tmp/test-root-action-yaml';
+      fs.mkdirSync(workspaceDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(workspaceDir, 'action.yaml'),
+        `
+name: Root Composite
+runs:
+  using: composite
+  steps:
+    - name: Nested action
+      uses: owner/action@v1
+`
+      );
+
+      const actions = extractActionsFromRootAction(workspaceDir);
+
+      expect(actions).toHaveLength(1);
+      expect(actions[0]).toMatchObject({
+        uses: 'owner/action@v1',
+        workflowFile: './action.yaml',
+        sourceWorkflowFile: './action.yaml',
+        stepName: 'Nested action',
+        supported: true
+      });
+
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+    });
+
+    test('should ignore root metadata without composite steps', () => {
+      const workspaceDir = '/tmp/test-root-node-action';
+      fs.mkdirSync(workspaceDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(workspaceDir, 'action.yml'),
+        `
+name: Root Node Action
+runs:
+  using: node24
+  main: dist/index.js
+`
+      );
+
+      expect(extractActionsFromRootAction(workspaceDir)).toEqual([]);
+
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+    });
+
+    test('should report malformed root metadata as unsupported', () => {
+      const workspaceDir = '/tmp/test-root-malformed-action';
+      fs.mkdirSync(workspaceDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(workspaceDir, 'action.yml'),
+        `
+name: Root Composite
+runs:
+  using: composite
+  steps: [
+`
+      );
+
+      expect(extractActionsFromRootAction(workspaceDir)).toEqual([
+        expect.objectContaining({
+          uses: './',
+          workflowFile: './action.yml',
+          sourceWorkflowFile: './action.yml',
+          supported: false,
+          unsupportedType: 'local-action',
+          message: 'Unsupported local action: failed to parse action.yml'
+        })
+      ]);
+      expect(mockCore.warning).toHaveBeenCalledWith(expect.stringContaining('Failed to parse local action'));
+
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+    });
+
+    test('should apply workflow exclusions during root action traversal', () => {
+      const workspaceDir = '/tmp/test-root-action-exclusions';
+      const workflowsDir = path.join(workspaceDir, '.github', 'workflows');
+      fs.mkdirSync(workflowsDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(workspaceDir, 'action.yml'),
+        `
+name: Root Composite
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/workflows/excluded.yml
+`
+      );
+      fs.writeFileSync(
+        path.join(workflowsDir, 'excluded.yml'),
+        `
+name: Excluded
+on:
+  workflow_call:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: owner/action@v1
+`
+      );
+
+      expect(
+        extractActionsFromRootAction(workspaceDir, {
+          excludeWorkflowPatterns: ['excluded.yml']
+        })
+      ).toEqual([]);
 
       fs.rmSync(workspaceDir, { recursive: true, force: true });
     });
@@ -476,6 +650,97 @@ runs:
       });
 
       fs.rmSync(workspaceDir, { recursive: true, force: true });
+    });
+
+    test('should not read local action metadata outside the workspace', () => {
+      const workspaceDir = '/tmp/test-workflow-local-action-traversal';
+      const outsideDir = '/tmp/test-workflow-local-action-traversal-outside';
+      const workflowsDir = path.join(workspaceDir, '.github', 'workflows');
+
+      fs.mkdirSync(workflowsDir, { recursive: true });
+      fs.mkdirSync(outsideDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(workflowsDir, 'ci.yml'),
+        `
+name: CI
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./../test-workflow-local-action-traversal-outside
+`
+      );
+      fs.writeFileSync(
+        path.join(outsideDir, 'action.yml'),
+        `
+name: Outside Composite
+runs:
+  using: composite
+  steps:
+    - uses: owner/action@v1
+`
+      );
+
+      const actions = extractActionsFromWorkflow(path.join(workflowsDir, 'ci.yml'), workspaceDir);
+
+      expect(actions).toEqual([
+        expect.objectContaining({
+          uses: './../test-workflow-local-action-traversal-outside',
+          supported: false,
+          unsupportedType: 'local-action',
+          message: 'Unsupported local action: path resolves outside workspace'
+        })
+      ]);
+
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+      fs.rmSync(outsideDir, { recursive: true, force: true });
+    });
+
+    test('should not read symlinked action metadata outside the workspace', () => {
+      const workspaceDir = fs.mkdtempSync('/tmp/test-workflow-metadata-symlink-');
+      const outsideDir = fs.mkdtempSync('/tmp/test-workflow-metadata-symlink-outside-');
+      const workflowsDir = path.join(workspaceDir, '.github', 'workflows');
+      const localActionDir = path.join(workspaceDir, 'local-action');
+      const outsideMetadata = path.join(outsideDir, 'action.yml');
+
+      fs.mkdirSync(workflowsDir, { recursive: true });
+      fs.mkdirSync(localActionDir);
+      fs.writeFileSync(
+        path.join(workflowsDir, 'ci.yml'),
+        `
+name: CI
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./local-action
+`
+      );
+      fs.writeFileSync(
+        outsideMetadata,
+        `
+name: Outside Composite
+runs:
+  using: composite
+  steps:
+    - uses: owner/action@v1
+`
+      );
+      fs.symlinkSync(outsideMetadata, path.join(localActionDir, 'action.yml'), 'file');
+
+      expect(extractActionsFromWorkflow(path.join(workflowsDir, 'ci.yml'), workspaceDir)).toEqual([
+        expect.objectContaining({
+          uses: './local-action',
+          supported: false,
+          unsupportedType: 'local-action',
+          message: 'Unsupported local action: metadata resolves outside workspace'
+        })
+      ]);
+
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+      fs.rmSync(outsideDir, { recursive: true, force: true });
     });
 
     test('should recurse into nested local composite actions', () => {
@@ -1163,6 +1428,19 @@ jobs:
       ).toBe(
         '[targets-mutable.yml](https://github.com/Wuodan/ensure-immutable-actions-test/blob/1234567890abcdef1234567890abcdef12345678/.github/workflows/targets-mutable.yml)'
       );
+    });
+
+    test('should format root action metadata source locations without a workflow prefix', () => {
+      expect(
+        formatSourceLocationLink(
+          {
+            workflowFile: './action.yml',
+            stepName: 'Nested action'
+          },
+          'owner/repo',
+          '1234567890abcdef1234567890abcdef12345678'
+        )
+      ).toBe('[./action.yml](https://github.com/owner/repo/blob/1234567890abcdef1234567890abcdef12345678/action.yml)');
     });
 
     test('should append linked source locations to summary messages', () => {
@@ -2283,8 +2561,215 @@ jobs:
 
       await run();
 
-      expect(mockCore.warning).toHaveBeenCalledWith(expect.stringContaining('No workflow files found'));
+      expect(mockCore.warning).toHaveBeenCalledWith(
+        expect.stringContaining('No workflow files or root action metadata found')
+      );
       expect(mockCore.setOutput).toHaveBeenCalledWith('all-passed', true);
+    });
+
+    test('should scan root action metadata when no workflow references it', async () => {
+      fs.rmSync(testWorkflowsDir, { recursive: true, force: true });
+      fs.writeFileSync(
+        path.join(testWorkspaceDir, 'action.yml'),
+        `
+name: Root Composite
+runs:
+  using: composite
+  steps:
+    - uses: owner/action@1234567890abcdef1234567890abcdef12345678
+`
+      );
+      mockOctokit.rest.repos.getContent.mockResolvedValue({
+        data: {
+          type: 'file',
+          encoding: 'base64',
+          content: Buffer.from(
+            `
+name: Nested Node Action
+runs:
+  using: node24
+  main: dist/index.js
+`,
+            'utf8'
+          ).toString('base64')
+        }
+      });
+
+      await run();
+
+      const checkedCall = mockCore.setOutput.mock.calls.find(c => c[0] === 'workflows-checked');
+      expect(JSON.parse(checkedCall[1])).toEqual(['./action.yml']);
+      const immutableCall = mockCore.setOutput.mock.calls.find(c => c[0] === 'immutable-actions');
+      expect(JSON.parse(immutableCall[1])).toEqual([
+        expect.objectContaining({
+          uses: 'owner/action@1234567890abcdef1234567890abcdef12345678',
+          sourceWorkflowFile: './action.yml'
+        })
+      ]);
+      expect(mockCore.setOutput).toHaveBeenCalledWith('all-passed', true);
+    });
+
+    test('should keep root action metadata separate from a workflow with the same filename', async () => {
+      fs.unlinkSync(path.join(testWorkflowsDir, 'ci.yml'));
+      fs.writeFileSync(
+        path.join(testWorkflowsDir, 'action.yml'),
+        `
+name: Workflow
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: workflow-owner/action@1234567890abcdef1234567890abcdef12345678
+`
+      );
+      fs.writeFileSync(
+        path.join(testWorkspaceDir, 'action.yml'),
+        `
+name: Root Composite
+runs:
+  using: composite
+  steps:
+    - uses: root-owner/action@abcdef1234567890abcdef1234567890abcdef12
+`
+      );
+      mockOctokit.rest.repos.getContent.mockResolvedValue({
+        data: {
+          type: 'file',
+          encoding: 'base64',
+          content: Buffer.from(
+            `
+name: Nested Node Action
+runs:
+  using: node24
+  main: dist/index.js
+`,
+            'utf8'
+          ).toString('base64')
+        }
+      });
+
+      await run();
+
+      const checkedCall = mockCore.setOutput.mock.calls.find(c => c[0] === 'workflows-checked');
+      expect(JSON.parse(checkedCall[1])).toEqual(['action.yml', './action.yml']);
+      const immutableCall = mockCore.setOutput.mock.calls.find(c => c[0] === 'immutable-actions');
+      const immutableOutput = JSON.parse(immutableCall[1]);
+      expect(immutableOutput).toHaveLength(2);
+      expect(immutableOutput.map(action => action.sourceWorkflowFile)).toEqual(['action.yml', './action.yml']);
+      expect(mockCore.summary.addRaw).toHaveBeenCalledWith('### ✅ action.yml\n\n');
+      expect(mockCore.summary.addRaw).toHaveBeenCalledWith('### ✅ ./action.yml\n\n');
+    });
+
+    test('should not scan root action metadata twice when a workflow references ./', async () => {
+      fs.writeFileSync(
+        path.join(testWorkflowsDir, 'ci.yml'),
+        `
+name: CI
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./
+`
+      );
+      fs.writeFileSync(
+        path.join(testWorkspaceDir, 'action.yml'),
+        `
+name: Root Composite
+runs:
+  using: composite
+  steps:
+    - uses: owner/action@1234567890abcdef1234567890abcdef12345678
+`
+      );
+      mockOctokit.rest.repos.getContent.mockResolvedValue({
+        data: {
+          type: 'file',
+          encoding: 'base64',
+          content: Buffer.from(
+            `
+name: Nested Node Action
+runs:
+  using: node24
+  main: dist/index.js
+`,
+            'utf8'
+          ).toString('base64')
+        }
+      });
+
+      await run();
+
+      const checkedCall = mockCore.setOutput.mock.calls.find(c => c[0] === 'workflows-checked');
+      expect(JSON.parse(checkedCall[1])).toEqual(['ci.yml']);
+      const immutableCall = mockCore.setOutput.mock.calls.find(c => c[0] === 'immutable-actions');
+      const immutableOutput = JSON.parse(immutableCall[1]);
+      expect(immutableOutput).toHaveLength(1);
+      expect(immutableOutput[0]).toMatchObject({
+        uses: 'owner/action@1234567890abcdef1234567890abcdef12345678',
+        sourceWorkflowFile: 'ci.yml'
+      });
+      expect(mockCore.info).toHaveBeenCalledWith(
+        'Root action metadata already scanned through a local action reference'
+      );
+    });
+
+    test('should not scan root action metadata twice when referenced through a symlink alias', async () => {
+      fs.writeFileSync(
+        path.join(testWorkflowsDir, 'ci.yml'),
+        `
+name: CI
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./root-alias
+`
+      );
+      fs.writeFileSync(
+        path.join(testWorkspaceDir, 'action.yml'),
+        `
+name: Root Composite
+runs:
+  using: composite
+  steps:
+    - uses: owner/action@1234567890abcdef1234567890abcdef12345678
+`
+      );
+      fs.symlinkSync('.', path.join(testWorkspaceDir, 'root-alias'), 'dir');
+      mockOctokit.rest.repos.getContent.mockResolvedValue({
+        data: {
+          type: 'file',
+          encoding: 'base64',
+          content: Buffer.from(
+            `
+name: Nested Node Action
+runs:
+  using: node24
+  main: dist/index.js
+`,
+            'utf8'
+          ).toString('base64')
+        }
+      });
+
+      await run();
+
+      const checkedCall = mockCore.setOutput.mock.calls.find(c => c[0] === 'workflows-checked');
+      expect(JSON.parse(checkedCall[1])).toEqual(['ci.yml']);
+      const immutableCall = mockCore.setOutput.mock.calls.find(c => c[0] === 'immutable-actions');
+      const immutableOutput = JSON.parse(immutableCall[1]);
+      expect(immutableOutput).toHaveLength(1);
+      expect(immutableOutput[0]).toMatchObject({
+        uses: 'owner/action@1234567890abcdef1234567890abcdef12345678',
+        sourceWorkflowFile: 'ci.yml'
+      });
+      expect(mockCore.info).toHaveBeenCalledWith(
+        'Root action metadata already scanned through a local action reference'
+      );
     });
 
     test('should not write summary when write-job-summary is false', async () => {

@@ -1,6 +1,6 @@
 /**
  * Ensure Immutable Actions GitHub Action
- * Validates that third-party actions in workflows are using immutable releases
+ * Validates that third-party actions in workflows and root action metadata use immutable releases
  *
  * Local Development & Testing:
  *
@@ -124,22 +124,47 @@ export function findLocalActionMetadataFile(actionDir) {
 }
 
 /**
+ * Check whether a path is equal to or contained by a parent directory
+ * @param {string} parentDir - Parent directory path
+ * @param {string} candidatePath - Candidate path
+ * @returns {boolean} True when the candidate is inside the parent directory
+ */
+export function isPathWithinDirectory(parentDir, candidatePath) {
+  const relativePath = path.relative(parentDir, candidatePath);
+  return (
+    relativePath === '' ||
+    (!relativePath.startsWith(`..${path.sep}`) && relativePath !== '..' && !path.isAbsolute(relativePath))
+  );
+}
+
+/**
  * Resolve a local action path from the current base directory with workspace-root fallback
  * @param {string} uses - Raw local action reference
  * @param {string} workspaceDir - Repository workspace root
  * @param {string} baseDir - Directory to resolve nested local actions from
- * @returns {string} Normalized local action directory path
+ * @returns {string|null} Normalized local action directory path or null when it escapes the workspace
  */
 export function resolveLocalActionDirectory(uses, workspaceDir, baseDir) {
   const candidateDirs = [path.resolve(baseDir, uses), path.resolve(workspaceDir, uses)];
+  const normalizedWorkspace = path.resolve(workspaceDir);
+  const realWorkspace = fs.realpathSync(normalizedWorkspace);
+  const safeCandidateDirs = candidateDirs.filter(candidateDir =>
+    isPathWithinDirectory(normalizedWorkspace, candidateDir)
+  );
+  let fallbackCandidateDir = null;
 
-  for (const candidateDir of candidateDirs) {
+  for (const candidateDir of safeCandidateDirs) {
     if (fs.existsSync(candidateDir)) {
-      return candidateDir;
+      const realCandidateDir = fs.realpathSync(candidateDir);
+      if (isPathWithinDirectory(realWorkspace, realCandidateDir)) {
+        return candidateDir;
+      }
+    } else if (!fallbackCandidateDir) {
+      fallbackCandidateDir = candidateDir;
     }
   }
 
-  return candidateDirs[0];
+  return fallbackCandidateDir;
 }
 
 /**
@@ -151,19 +176,25 @@ export function resolveLocalActionDirectory(uses, workspaceDir, baseDir) {
 export function resolveLocalReusableWorkflowPath(uses, workspaceDir) {
   const candidatePaths = [path.resolve(workspaceDir, uses)];
   const normalizedWorkspace = path.resolve(workspaceDir);
+  const realWorkspace = fs.realpathSync(normalizedWorkspace);
+  let fallbackCandidatePath = null;
 
   for (const candidatePath of candidatePaths) {
-    if (candidatePath.startsWith(normalizedWorkspace + path.sep) && fs.existsSync(candidatePath)) {
-      return candidatePath;
+    if (!isPathWithinDirectory(normalizedWorkspace, candidatePath)) {
+      continue;
+    }
+
+    if (fs.existsSync(candidatePath)) {
+      const realCandidatePath = fs.realpathSync(candidatePath);
+      if (isPathWithinDirectory(realWorkspace, realCandidatePath)) {
+        return candidatePath;
+      }
+    } else if (!fallbackCandidatePath) {
+      fallbackCandidatePath = candidatePath;
     }
   }
 
-  // Ensure fallback is also within workspace to prevent path traversal
-  const fallback = candidatePaths[0];
-  if (!fallback.startsWith(normalizedWorkspace + path.sep)) {
-    return null;
-  }
-  return fallback;
+  return fallbackCandidatePath;
 }
 
 /**
@@ -261,12 +292,26 @@ export function createUnsupportedLocalAction(uses, metadata, message) {
  * @param {string} workspaceDir - Repository workspace root
  * @param {string} baseDir - Directory to resolve nested local actions from
  * @param {Set<string>} visitedLocalActions - Set of visited local action directories
+ * @param {Object} options - Local action extraction options
  * @returns {Array} Extracted nested action references or unsupported fallback
  */
-export function extractActionsFromLocalAction(uses, metadata, workspaceDir, baseDir, visitedLocalActions = new Set()) {
+export function extractActionsFromLocalAction(
+  uses,
+  metadata,
+  workspaceDir,
+  baseDir,
+  visitedLocalActions = new Set(),
+  options = {}
+) {
   const localActionDir = resolveLocalActionDirectory(uses, workspaceDir, baseDir);
+  if (!localActionDir) {
+    return [createUnsupportedLocalAction(uses, metadata, 'Unsupported local action: path resolves outside workspace')];
+  }
 
-  if (visitedLocalActions.has(localActionDir)) {
+  const canonicalLocalActionDir = fs.existsSync(localActionDir) ? fs.realpathSync(localActionDir) : localActionDir;
+  options.referencedLocalActionDirs?.add(canonicalLocalActionDir);
+
+  if (visitedLocalActions.has(canonicalLocalActionDir)) {
     core.warning(`Skipping recursive local action cycle: ${uses}`);
     return [];
   }
@@ -276,12 +321,23 @@ export function extractActionsFromLocalAction(uses, metadata, workspaceDir, base
     return [createUnsupportedLocalAction(uses, metadata, 'Unsupported local action: action.yml not found')];
   }
 
+  const canonicalWorkspaceDir = fs.realpathSync(path.resolve(workspaceDir));
+  const canonicalMetadataFile = fs.realpathSync(metadataFile);
+  if (!isPathWithinDirectory(canonicalWorkspaceDir, canonicalMetadataFile)) {
+    return [
+      createUnsupportedLocalAction(uses, metadata, 'Unsupported local action: metadata resolves outside workspace')
+    ];
+  }
+
   try {
     const content = fs.readFileSync(metadataFile, 'utf8');
     const actionDefinition = YAML.parse(content);
     const actionType = actionDefinition?.runs?.using;
 
     if (actionType !== 'composite') {
+      if (options.reportNonCompositeUnsupported === false) {
+        return [];
+      }
       return [
         createUnsupportedLocalAction(uses, metadata, `Unsupported local action type: ${actionType || 'unknown'}`)
       ];
@@ -289,7 +345,7 @@ export function extractActionsFromLocalAction(uses, metadata, workspaceDir, base
 
     const nestedActions = [];
     const nextVisitedLocalActions = new Set(visitedLocalActions);
-    nextVisitedLocalActions.add(localActionDir);
+    nextVisitedLocalActions.add(canonicalLocalActionDir);
 
     for (const step of actionDefinition?.runs?.steps || []) {
       if (step?.uses) {
@@ -303,7 +359,9 @@ export function extractActionsFromLocalAction(uses, metadata, workspaceDir, base
           {
             workspaceDir,
             baseDir: localActionDir,
-            visitedLocalActions: nextVisitedLocalActions
+            visitedLocalActions: nextVisitedLocalActions,
+            excludeWorkflowPatterns: options.excludeWorkflowPatterns,
+            referencedLocalActionDirs: options.referencedLocalActionDirs
           }
         );
       }
@@ -317,12 +375,43 @@ export function extractActionsFromLocalAction(uses, metadata, workspaceDir, base
 }
 
 /**
+ * Extract nested references from repository-root action metadata
+ * @param {string} workspaceDir - Repository workspace root
+ * @param {Object} options - Root action extraction options
+ * @returns {Array} Extracted nested action references
+ */
+export function extractActionsFromRootAction(workspaceDir, options = {}) {
+  const metadataFile = findLocalActionMetadataFile(workspaceDir);
+  if (!metadataFile) {
+    return [];
+  }
+
+  const metadataName = path.basename(metadataFile);
+  return extractActionsFromLocalAction(
+    './',
+    {
+      workflowFile: `./${metadataName}`,
+      entrypointUses: './',
+      sourceWorkflowFile: `./${metadataName}`
+    },
+    workspaceDir,
+    workspaceDir,
+    new Set(),
+    {
+      reportNonCompositeUnsupported: false,
+      excludeWorkflowPatterns: options.excludeWorkflowPatterns
+    }
+  );
+}
+
+/**
  * Extract nested references from a local reusable workflow
  * @param {string} uses - Raw local workflow reference
  * @param {Object} metadata - Workflow metadata for the reference
  * @param {string} workspaceDir - Repository workspace root
  * @param {Array<string>} excludeWorkflowPatterns - Exclude patterns
  * @param {Set<string>} visitedWorkflows - Already-visited workflow paths for cycle detection
+ * @param {Set<string>} referencedLocalActionDirs - Local action directories reached during extraction
  * @returns {Array} Extracted nested action references
  */
 export function extractActionsFromLocalReusableWorkflow(
@@ -330,7 +419,8 @@ export function extractActionsFromLocalReusableWorkflow(
   metadata,
   workspaceDir,
   excludeWorkflowPatterns = [],
-  visitedWorkflows = new Set()
+  visitedWorkflows = new Set(),
+  referencedLocalActionDirs
 ) {
   if (isExcludedWorkflow(uses, excludeWorkflowPatterns)) {
     return [];
@@ -371,7 +461,8 @@ export function extractActionsFromLocalReusableWorkflow(
           {
             workspaceDir,
             excludeWorkflowPatterns,
-            visitedWorkflows: nextVisitedWorkflows
+            visitedWorkflows: nextVisitedWorkflows,
+            referencedLocalActionDirs
           }
         );
       }
@@ -393,7 +484,8 @@ export function extractActionsFromLocalReusableWorkflow(
             {
               workspaceDir,
               excludeWorkflowPatterns,
-              visitedWorkflows: nextVisitedWorkflows
+              visitedWorkflows: nextVisitedWorkflows,
+              referencedLocalActionDirs
             }
           );
         }
@@ -420,6 +512,7 @@ export function addParsedAction(actions, uses, metadata, options = {}) {
   const visitedLocalActions = options.visitedLocalActions || new Set();
   const excludeWorkflowPatterns = options.excludeWorkflowPatterns || [];
   const visitedWorkflows = options.visitedWorkflows || new Set();
+  const referencedLocalActionDirs = options.referencedLocalActionDirs;
 
   if (uses.startsWith('./')) {
     if (isLocalReusableWorkflowReference(uses)) {
@@ -429,12 +522,18 @@ export function addParsedAction(actions, uses, metadata, options = {}) {
           metadata,
           workspaceDir,
           excludeWorkflowPatterns,
-          visitedWorkflows
+          visitedWorkflows,
+          referencedLocalActionDirs
         )
       );
       return;
     }
-    actions.push(...extractActionsFromLocalAction(uses, metadata, workspaceDir, baseDir, visitedLocalActions));
+    actions.push(
+      ...extractActionsFromLocalAction(uses, metadata, workspaceDir, baseDir, visitedLocalActions, {
+        excludeWorkflowPatterns,
+        referencedLocalActionDirs
+      })
+    );
     return;
   }
 
@@ -484,6 +583,7 @@ export function extractActionsFromWorkflow(
     const workflow = YAML.parse(content);
     const workflowFile = path.basename(workflowPath);
     const excludeWorkflowPatterns = options.excludeWorkflowPatterns || [];
+    const referencedLocalActionDirs = options.referencedLocalActionDirs;
 
     const actions = [];
     const jobs = workflow?.jobs || {};
@@ -502,7 +602,8 @@ export function extractActionsFromWorkflow(
           },
           {
             workspaceDir,
-            excludeWorkflowPatterns
+            excludeWorkflowPatterns,
+            referencedLocalActionDirs
           }
         );
       }
@@ -524,7 +625,8 @@ export function extractActionsFromWorkflow(
             },
             {
               workspaceDir,
-              excludeWorkflowPatterns
+              excludeWorkflowPatterns,
+              referencedLocalActionDirs
             }
           );
         }
@@ -1000,8 +1102,10 @@ export function formatSourceLocationLink(sourceLocation, repository, sha) {
     return locationText;
   }
 
-  const workflowPath = `.github/workflows/${sourceLocation.workflowFile}`;
-  const url = `https://github.com/${repository}/blob/${sha}/${workflowPath}`;
+  const sourcePath = sourceLocation.workflowFile.startsWith('./')
+    ? sourceLocation.workflowFile.slice(2)
+    : `.github/workflows/${sourceLocation.workflowFile}`;
+  const url = `https://github.com/${repository}/blob/${sha}/${sourcePath}`;
   return `[${locationText}](${url})`;
 }
 
@@ -1354,20 +1458,14 @@ export async function run() {
     // Get workflow files to check
     const workflowFiles = getWorkflowFiles(workflowsInput, excludeWorkflowsInput, workspaceDir);
     const excludeWorkflowPatterns = parseWorkflowPatterns(excludeWorkflowsInput);
+    const rootActionMetadataFile = findLocalActionMetadataFile(workspaceDir);
+    const referencedLocalActionDirs = new Set();
+    const checkedFiles = workflowFiles.map(f => path.basename(f));
 
-    if (workflowFiles.length === 0) {
-      core.warning('No workflow files found to check');
-      core.setOutput('all-passed', true);
-      core.setOutput('workflows-checked', '[]');
-      core.setOutput('mutable-actions', '[]');
-      core.setOutput('immutable-actions', '[]');
-      core.setOutput('unsupported-actions', '[]');
-      return;
+    if (workflowFiles.length > 0) {
+      core.info(`Found ${workflowFiles.length} workflow file(s) to check`);
+      core.info(`Workflows: ${checkedFiles.join(', ')}`);
     }
-
-    core.info(`Found ${workflowFiles.length} workflow file(s) to check`);
-    const workflowBasenames = workflowFiles.map(f => path.basename(f));
-    core.info(`Workflows: ${workflowBasenames.join(', ')}`);
 
     // Extract all actions from workflows
     const allActions = [];
@@ -1375,16 +1473,40 @@ export async function run() {
       const basename = path.basename(workflowFile);
       core.info(`Parsing workflow: ${basename}`);
       const actions = extractActionsFromWorkflow(workflowFile, workspaceDir, {
-        excludeWorkflowPatterns
+        excludeWorkflowPatterns,
+        referencedLocalActionDirs
       });
       core.info(`  Found ${actions.length} action(s)`);
       allActions.push(...actions);
     }
 
-    if (allActions.length === 0) {
-      core.info('No actions found in workflows');
+    const rootActionDir = fs.realpathSync(path.resolve(workspaceDir));
+    if (rootActionMetadataFile && !referencedLocalActionDirs.has(rootActionDir)) {
+      const rootActionMetadataName = path.basename(rootActionMetadataFile);
+      core.info(`Parsing root action metadata: ${rootActionMetadataName}`);
+      const actions = extractActionsFromRootAction(workspaceDir, { excludeWorkflowPatterns });
+      core.info(`  Found ${actions.length} action(s)`);
+      allActions.push(...actions);
+      checkedFiles.push(`./${rootActionMetadataName}`);
+    } else if (rootActionMetadataFile) {
+      core.info('Root action metadata already scanned through a local action reference');
+    }
+
+    if (checkedFiles.length === 0) {
+      core.warning('No workflow files or root action metadata found to check');
       core.setOutput('all-passed', true);
-      core.setOutput('workflows-checked', JSON.stringify(workflowBasenames));
+      core.setOutput('workflows-checked', '[]');
+      core.setOutput('mutable-actions', '[]');
+      core.setOutput('immutable-actions', '[]');
+      core.setOutput('unsupported-actions', '[]');
+      core.setOutput('first-party-actions', '[]');
+      return;
+    }
+
+    if (allActions.length === 0) {
+      core.info('No actions found in checked files');
+      core.setOutput('all-passed', true);
+      core.setOutput('workflows-checked', JSON.stringify(checkedFiles));
       core.setOutput('mutable-actions', '[]');
       core.setOutput('immutable-actions', '[]');
       core.setOutput('unsupported-actions', '[]');
@@ -1395,7 +1517,7 @@ export async function run() {
         try {
           await core.summary
             .addRaw('# ✅ Immutable Actions Check - All Passed\n\n')
-            .addRaw(`No actions found in checked workflows.`)
+            .addRaw(`No actions found in checked files.`)
             .write();
         } catch {
           core.info('✅ All checks passed (no actions found)');
@@ -1429,7 +1551,7 @@ export async function run() {
     );
 
     // Set outputs
-    core.setOutput('workflows-checked', JSON.stringify(workflowBasenames));
+    core.setOutput('workflows-checked', JSON.stringify(checkedFiles));
     core.setOutput('mutable-actions', JSON.stringify(mutable));
     core.setOutput('immutable-actions', JSON.stringify(immutable));
     core.setOutput('unsupported-actions', JSON.stringify(unsupported));
@@ -1439,7 +1561,7 @@ export async function run() {
     const allPassed = mutable.length === 0 && unsupported.length === 0;
     const willFailRun = failOnMutable && mutable.length > 0;
 
-    // Create summary with separate tables per workflow
+    // Create summary with separate tables per scan entrypoint
     if (shouldWriteJobSummary(writeJobSummary, allPassed)) {
       try {
         let summary = core.summary;
@@ -1455,13 +1577,13 @@ export async function run() {
         const excludedCount = firstParty.filter(a => a.excluded).length;
 
         summary = summary
-          .addRaw(`**Workflows Checked:** ${workflowBasenames.join(', ')}\n\n`)
+          .addRaw(`**Files Checked:** ${checkedFiles.join(', ')}\n\n`)
           .addRaw(
             `**Summary:** ${excludedCount} excluded, ${immutable.length} immutable, ${mutable.length} mutable, ${unsupported.length} unsupported\n\n`
           );
 
-        // Add a table for each workflow
-        for (const workflowFile of workflowBasenames) {
+        // Add a table for each scan entrypoint
+        for (const workflowFile of checkedFiles) {
           const workflowData = byWorkflow[workflowFile];
 
           if (
@@ -1515,7 +1637,7 @@ export async function run() {
       } catch {
         // Fallback for local development
         core.info('📊 Immutable Actions Check Results:');
-        core.info(`   Workflows: ${workflowBasenames.join(', ')}`);
+        core.info(`   Files: ${checkedFiles.join(', ')}`);
         core.info(`   First-party: ${firstParty.length}`);
         core.info(`   Immutable: ${immutable.length}`);
         core.info(`   Mutable: ${mutable.length}`);
