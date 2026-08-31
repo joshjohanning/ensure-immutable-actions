@@ -71,6 +71,7 @@ const {
   resolveLocalActionDirectory,
   resolveLocalReusableWorkflowPath,
   normalizeGitRef,
+  normalizeReleaseTag,
   checkReleaseImmutability,
   resolveSuggestedPin,
   checkAllActions,
@@ -83,8 +84,13 @@ describe('Ensure Immutable Actions', () => {
   beforeEach(() => {
     jest.clearAllMocks();
 
-    mockOctokit.paginate.mockReset();
-    mockOctokit.rest.git.getRef.mockReset();
+    const notFound = Object.assign(new Error('Not Found'), { status: 404 });
+    mockOctokit.paginate.mockReset().mockResolvedValue([]);
+    mockOctokit.rest.git.getRef.mockReset().mockRejectedValue(notFound);
+    mockOctokit.rest.repos.getReleaseByTag.mockReset().mockRejectedValue(notFound);
+    mockOctokit.rest.repos.getLatestRelease.mockReset().mockRejectedValue(notFound);
+    mockOctokit.rest.repos.listReleases.mockReset().mockResolvedValue({ data: [] });
+    mockOctokit.rest.repos.getCommit.mockReset().mockRejectedValue(notFound);
     MockOctokit.mockReturnValue(mockOctokit);
 
     // Set default inputs
@@ -1191,6 +1197,8 @@ jobs:
         expect(normalizeGitRef('refs/tags/v1')).toBe('v1');
         expect(normalizeGitRef('refs/heads/main')).toBe('main');
         expect(normalizeGitRef('v2')).toBe('v2');
+        expect(normalizeReleaseTag('refs/tags/v1')).toBe('v1');
+        expect(normalizeReleaseTag('refs/heads/main')).toBe('refs/heads/main');
       });
 
       test('should resolve a fully-qualified tag using its short name', async () => {
@@ -1520,6 +1528,41 @@ jobs:
   });
 
   describe('checkAllActions', () => {
+    test('should normalize qualified tags but preserve qualified branches for release checks', async () => {
+      const actions = [
+        {
+          uses: 'owner/repo@refs/tags/v1',
+          owner: 'owner',
+          repo: 'repo',
+          ref: 'refs/tags/v1',
+          workflowFile: 'workflow.yml'
+        },
+        {
+          uses: 'owner/repo@refs/heads/v1',
+          owner: 'owner',
+          repo: 'repo',
+          ref: 'refs/heads/v1',
+          workflowFile: 'workflow.yml'
+        }
+      ];
+      mockOctokit.rest.repos.getReleaseByTag.mockResolvedValue({
+        data: { immutable: true }
+      });
+
+      await checkAllActions(mockOctokit, actions, false, false);
+
+      expect(mockOctokit.rest.repos.getReleaseByTag).toHaveBeenNthCalledWith(1, {
+        owner: 'owner',
+        repo: 'repo',
+        tag: 'v1'
+      });
+      expect(mockOctokit.rest.repos.getReleaseByTag).toHaveBeenNthCalledWith(2, {
+        owner: 'owner',
+        repo: 'repo',
+        tag: 'refs/heads/v1'
+      });
+    });
+
     test('should check multiple actions and categorize them', async () => {
       const actions = [
         {

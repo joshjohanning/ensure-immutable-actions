@@ -1068,6 +1068,15 @@ export function normalizeGitRef(ref) {
 }
 
 /**
+ * Normalize only a fully-qualified tag while preserving explicit branch refs
+ * @param {string} ref - Git reference
+ * @returns {string} Tag name or unchanged reference
+ */
+export function normalizeReleaseTag(ref) {
+  return ref.replace(/^refs\/tags\//, '');
+}
+
+/**
  * Resolve a recommended immutable pin for a mutable action
  * @param {Octokit} octokit - Octokit instance
  * @param {Object} action - Mutable action reference
@@ -1315,7 +1324,7 @@ export async function checkAllActions(octokit, actions, includeFirstParty = fals
   for (const action of uniqueActions) {
     core.info(`Checking ${formatActionReferenceText(action)}...`);
 
-    const result = await checkReleaseImmutability(octokit, action.owner, action.repo, action.ref);
+    const result = await checkReleaseImmutability(octokit, action.owner, action.repo, normalizeReleaseTag(action.ref));
     if (!result.immutable && suggestPins) {
       const suggestionKey = `${action.owner}/${action.repo}@${action.ref}`;
       if (!suggestedPinCache.has(suggestionKey)) {
