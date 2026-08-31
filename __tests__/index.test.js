@@ -267,6 +267,22 @@ describe('Ensure Immutable Actions', () => {
 
       fs.rmSync(workspaceDir, { recursive: true, force: true });
     });
+
+    test('should reject local action paths outside the workspace', () => {
+      const workspaceDir = '/tmp/test-resolve-local-action-traversal';
+      const outsideDir = '/tmp/test-resolve-local-action-traversal-outside';
+
+      fs.mkdirSync(workspaceDir, { recursive: true });
+      fs.mkdirSync(outsideDir, { recursive: true });
+      fs.writeFileSync(path.join(outsideDir, 'action.yml'), 'name: Outside Action');
+
+      expect(
+        resolveLocalActionDirectory('./../test-resolve-local-action-traversal-outside', workspaceDir, workspaceDir)
+      ).toBeNull();
+
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+      fs.rmSync(outsideDir, { recursive: true, force: true });
+    });
   });
 
   describe('extractActionsFromRootAction', () => {
@@ -563,6 +579,51 @@ runs:
       });
 
       fs.rmSync(workspaceDir, { recursive: true, force: true });
+    });
+
+    test('should not read local action metadata outside the workspace', () => {
+      const workspaceDir = '/tmp/test-workflow-local-action-traversal';
+      const outsideDir = '/tmp/test-workflow-local-action-traversal-outside';
+      const workflowsDir = path.join(workspaceDir, '.github', 'workflows');
+
+      fs.mkdirSync(workflowsDir, { recursive: true });
+      fs.mkdirSync(outsideDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(workflowsDir, 'ci.yml'),
+        `
+name: CI
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./../test-workflow-local-action-traversal-outside
+`
+      );
+      fs.writeFileSync(
+        path.join(outsideDir, 'action.yml'),
+        `
+name: Outside Composite
+runs:
+  using: composite
+  steps:
+    - uses: owner/action@v1
+`
+      );
+
+      const actions = extractActionsFromWorkflow(path.join(workflowsDir, 'ci.yml'), workspaceDir);
+
+      expect(actions).toEqual([
+        expect.objectContaining({
+          uses: './../test-workflow-local-action-traversal-outside',
+          supported: false,
+          unsupportedType: 'local-action',
+          message: 'Unsupported local action: path resolves outside workspace'
+        })
+      ]);
+
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+      fs.rmSync(outsideDir, { recursive: true, force: true });
     });
 
     test('should recurse into nested local composite actions', () => {

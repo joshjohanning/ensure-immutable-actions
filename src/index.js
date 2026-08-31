@@ -128,18 +128,22 @@ export function findLocalActionMetadataFile(actionDir) {
  * @param {string} uses - Raw local action reference
  * @param {string} workspaceDir - Repository workspace root
  * @param {string} baseDir - Directory to resolve nested local actions from
- * @returns {string} Normalized local action directory path
+ * @returns {string|null} Normalized local action directory path or null when it escapes the workspace
  */
 export function resolveLocalActionDirectory(uses, workspaceDir, baseDir) {
   const candidateDirs = [path.resolve(baseDir, uses), path.resolve(workspaceDir, uses)];
+  const normalizedWorkspace = path.resolve(workspaceDir);
+  const safeCandidateDirs = candidateDirs.filter(
+    candidateDir => candidateDir === normalizedWorkspace || candidateDir.startsWith(normalizedWorkspace + path.sep)
+  );
 
-  for (const candidateDir of candidateDirs) {
+  for (const candidateDir of safeCandidateDirs) {
     if (fs.existsSync(candidateDir)) {
       return candidateDir;
     }
   }
 
-  return candidateDirs[0];
+  return safeCandidateDirs[0] || null;
 }
 
 /**
@@ -273,6 +277,13 @@ export function extractActionsFromLocalAction(
   options = {}
 ) {
   const localActionDir = resolveLocalActionDirectory(uses, workspaceDir, baseDir);
+  if (!localActionDir) {
+    if (options.reportUnsupported === false) {
+      return [];
+    }
+    return [createUnsupportedLocalAction(uses, metadata, 'Unsupported local action: path resolves outside workspace')];
+  }
+
   options.referencedLocalActionDirs?.add(path.resolve(localActionDir));
 
   if (visitedLocalActions.has(localActionDir)) {
