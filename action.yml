@@ -10,6 +10,10 @@ inputs:
     description: 'GitHub token for API calls. The default github.token works for public repos. For recursion into private/internal repos, use a PAT or GitHub App token with contents: read scope.'
     required: true
     default: ${{ github.token }}
+  github-api-url:
+    description: 'GitHub REST API URL for GitHub.com, GHES, or GHEC-DR'
+    required: false
+    default: ${{ github.api_url }}
   fail-on-mutable:
     description: 'Fail the workflow if mutable actions are found'
     required: false
@@ -28,10 +32,14 @@ inputs:
     description: 'Controls job summary output. true: always write summary table, false: never write summary, on-failure-only: write summary only when checks find mutable or unsupported references.'
     required: false
     default: 'true'
+  suggest-pins:
+    description: 'Resolve and include suggested immutable commit SHA pins for mutable actions. Suggestions are added to mutable-actions output and, when enabled, the job summary.'
+    required: false
+    default: 'true'
 
 outputs:
   mutable-actions:
-    description: 'JSON array of actions using mutable releases'
+    description: 'JSON array of actions using mutable releases, including suggestedPin details when available and enabled'
   immutable-actions:
     description: 'JSON array of actions using immutable releases'
   unsupported-actions:

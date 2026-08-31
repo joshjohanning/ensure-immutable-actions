@@ -46,11 +46,11 @@ The action generates a report organized by scanned workflow or root action metad
 
 **Actions:** 0 excluded, 1 immutable, 2 mutable
 
-| Action                                                                             | Status       | Message                             |
-| ---------------------------------------------------------------------------------- | ------------ | ----------------------------------- |
-| [owner/secure-action@v2.0.0](https://github.com/owner/secure-action/tree/v2.0.0)   | ✅ Immutable | Immutable release                   |
-| [owner/mutable-action@v1](https://github.com/owner/mutable-action/tree/v1)         | ❌ Mutable   | No release found for this reference |
-| [owner/another-action@v2.1.0](https://github.com/owner/another-action/tree/v2.1.0) | ❌ Mutable   | Mutable release                     |
+| Action                                                                             | Status       | Suggested Pin                                                            | Message                             |
+| ---------------------------------------------------------------------------------- | ------------ | ------------------------------------------------------------------------ | ----------------------------------- |
+| [owner/secure-action@v2.0.0](https://github.com/owner/secure-action/tree/v2.0.0)   | ✅ Immutable |                                                                          | Immutable release                   |
+| [owner/mutable-action@v1](https://github.com/owner/mutable-action/tree/v1)         | ❌ Mutable   | `owner/mutable-action@0123456789abcdef0123456789abcdef01234567` # v1.2.3 | No release found for this reference |
+| [owner/another-action@v2.1.0](https://github.com/owner/another-action/tree/v2.1.0) | ❌ Mutable   | `owner/another-action@89abcdef0123456789abcdef0123456789abcdef` # v2.1.0 | Mutable release                     |
 
 ## Usage
 
@@ -124,25 +124,31 @@ Patterns containing `/` match the full workflow path without the `@ref`, which l
 
 ## Inputs
 
-| Input                 | Description                                                                                                                                                                                                                                                                           | Required | Default               |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | --------------------- |
-| `github-token`        | GitHub token for API calls. The default `github.token` works for public repos. For recursion into private/internal repos, use a PAT or GitHub App token with `contents: read` scope.                                                                                                  | Yes      | `${{ github.token }}` |
-| `fail-on-mutable`     | Fail the workflow if mutable actions are found                                                                                                                                                                                                                                        | No       | `true`                |
-| `workflows`           | Specific workflow files to check (comma-separated filenames or glob patterns, e.g., `ci.yml,deploy-*.yml`). **If not specified, checks ALL workflows in `.github/workflows/`.** Root action metadata is also checked when present unless already reached through a selected workflow. | No       | All workflows         |
-| `exclude-workflows`   | Workflow files to exclude from checks (comma-separated filenames or glob patterns, e.g., `experimental-*.yml`). Patterns containing `/` match the full workflow path without the `@ref`, e.g., `owner/repo/.github/workflows/ci.yml`.                                                 | No       | -                     |
-| `include-first-party` | Include first-party actions (`actions/*`, `github/*`, `octokit/*`) in immutability checks. When `true`, first-party actions are also checked and appear in `mutable-actions`/`immutable-actions` outputs in addition to `first-party-actions`.                                        | No       | `false`               |
-| `write-job-summary`   | Controls job summary output: `true` (always write), `false` (never write), or `on-failure-only` (write only when mutable/unsupported references are found).                                                                                                                           | No       | `true`                |
+| Input                 | Description                                                                                                                                                                                                                                                                           | Required | Default                 |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ----------------------- |
+| `github-token`        | GitHub token for API calls. The default `github.token` works for public repos. For recursion into private/internal repos, use a PAT or GitHub App token with `contents: read` scope.                                                                                                  | Yes      | `${{ github.token }}`   |
+| `github-api-url`      | GitHub REST API URL for GitHub.com, GHES, or GHEC-DR.                                                                                                                                                                                                                                 | No       | `${{ github.api_url }}` |
+| `fail-on-mutable`     | Fail the workflow if mutable actions are found                                                                                                                                                                                                                                        | No       | `true`                  |
+| `workflows`           | Specific workflow files to check (comma-separated filenames or glob patterns, e.g., `ci.yml,deploy-*.yml`). **If not specified, checks ALL workflows in `.github/workflows/`.** Root action metadata is also checked when present unless already reached through a selected workflow. | No       | All workflows           |
+| `exclude-workflows`   | Workflow files to exclude from checks (comma-separated filenames or glob patterns, e.g., `experimental-*.yml`). Patterns containing `/` match the full workflow path without the `@ref`, e.g., `owner/repo/.github/workflows/ci.yml`.                                                 | No       | -                       |
+| `include-first-party` | Include first-party actions (`actions/*`, `github/*`, `octokit/*`) in immutability checks. When `true`, first-party actions are also checked and appear in `mutable-actions`/`immutable-actions` outputs in addition to `first-party-actions`.                                        | No       | `false`                 |
+| `write-job-summary`   | Controls job summary output: `true` (always write), `false` (never write), or `on-failure-only` (write only when mutable/unsupported references are found).                                                                                                                           | No       | `true`                  |
+| `suggest-pins`        | Resolve suggested full commit SHA pins for mutable actions. Suggestions appear in `mutable-actions` and in the job summary when it is written.                                                                                                                                        | No       | `true`                  |
 
 ## Outputs
 
 | Output                | Description                                                                                                                                                           |
 | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mutable-actions`     | JSON array of actions using mutable releases                                                                                                                          |
+| `mutable-actions`     | JSON array of actions using mutable releases, including `suggestedPin` details when available and enabled                                                             |
 | `immutable-actions`   | JSON array of actions using immutable releases                                                                                                                        |
 | `unsupported-actions` | JSON array of action references that were found but not analyzed because their reference type is unsupported                                                          |
 | `first-party-actions` | JSON array of all first-party actions with `allowed` and `message` fields indicating their status.                                                                    |
 | `all-passed`          | Boolean indicating if all checks passed                                                                                                                               |
 | `workflows-checked`   | List of workflow and repository-root action metadata files checked as scan entrypoints. Root metadata uses a `./` prefix to distinguish it from same-named workflows. |
+
+When pin suggestions are enabled, mutable action objects include `suggestedPin` as either
+`{"sha":"<full-sha>","tag":"<tag>","source":"referenced-release|referenced-tag|latest-release|latest-prerelease"}`
+or `null` when resolution fails. The property is omitted when `suggest-pins` is disabled.
 
 ## Examples
 
@@ -169,6 +175,16 @@ Patterns containing `/` match the full workflow path without the `@ref`, which l
   with:
     write-job-summary: on-failure-only
 ```
+
+### Disable suggested pins
+
+```yaml
+- uses: joshjohanning/ensure-immutable-actions@v2
+  with:
+    suggest-pins: false
+```
+
+When enabled, the action first resolves the referenced tag itself. For branch-like references, it suggests the latest stable release, falling back to the newest prerelease when no stable release exists. If a suggestion cannot be resolved, the action warns and leaves it blank.
 
 ### Check only CI/CD workflows
 
@@ -200,9 +216,6 @@ Patterns containing `/` match the full workflow path without the `@ref`, which l
 6. **Reports Unsupported References**: Surfaces unsupported reference types such as local actions and `docker://` references separately from mutable/immutable findings
 7. **Reports Results**: Creates a summary with all findings, including the source workflow or action metadata file for each finding
 8. **Optionally Fails**: If `fail-on-mutable` is true, fails the workflow when mutable actions are found
-
-> [!NOTE]
-> This action always checks immutability against the github.com API since that is the provenance for marketplace actions. It is not designed for use with GHES API URLs.
 
 > [!NOTE]
 > Recursion into remote composite actions and reusable workflows uses the `github-token` to fetch file contents via the GitHub API. The default `GITHUB_TOKEN` only has `contents: read` access to the triggering repository — remote references in private or internal repositories may not be readable and can be reported as unsupported in the action output/summary. To enable full recursion across private repos, provide a token with broader `contents: read` scope, such as a GitHub App token:
