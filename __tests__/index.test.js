@@ -59,6 +59,7 @@ const {
   getWorkflowFiles,
   isExcludedWorkflow,
   isLocalReusableWorkflowReference,
+  isPathWithinDirectory,
   isReusableWorkflowReference,
   resolveLocalActionDirectory,
   resolveLocalReusableWorkflowPath,
@@ -282,6 +283,17 @@ describe('Ensure Immutable Actions', () => {
 
       fs.rmSync(workspaceDir, { recursive: true, force: true });
       fs.rmSync(outsideDir, { recursive: true, force: true });
+    });
+
+    test('should resolve local actions when the workspace is a filesystem root', () => {
+      const actionDir = fs.mkdtempSync('/tmp/test-resolve-root-workspace-');
+      const workspaceRoot = path.parse(actionDir).root;
+      const uses = `.${actionDir}`;
+
+      expect(isPathWithinDirectory(workspaceRoot, actionDir)).toBe(true);
+      expect(resolveLocalActionDirectory(uses, workspaceRoot, workspaceRoot)).toBe(actionDir);
+
+      fs.rmSync(actionDir, { recursive: true, force: true });
     });
 
     test('should reject local action symlinks that escape the workspace', () => {

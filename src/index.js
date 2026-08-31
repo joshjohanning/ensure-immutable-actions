@@ -124,6 +124,20 @@ export function findLocalActionMetadataFile(actionDir) {
 }
 
 /**
+ * Check whether a path is equal to or contained by a parent directory
+ * @param {string} parentDir - Parent directory path
+ * @param {string} candidatePath - Candidate path
+ * @returns {boolean} True when the candidate is inside the parent directory
+ */
+export function isPathWithinDirectory(parentDir, candidatePath) {
+  const relativePath = path.relative(parentDir, candidatePath);
+  return (
+    relativePath === '' ||
+    (!relativePath.startsWith(`..${path.sep}`) && relativePath !== '..' && !path.isAbsolute(relativePath))
+  );
+}
+
+/**
  * Resolve a local action path from the current base directory with workspace-root fallback
  * @param {string} uses - Raw local action reference
  * @param {string} workspaceDir - Repository workspace root
@@ -134,15 +148,15 @@ export function resolveLocalActionDirectory(uses, workspaceDir, baseDir) {
   const candidateDirs = [path.resolve(baseDir, uses), path.resolve(workspaceDir, uses)];
   const normalizedWorkspace = path.resolve(workspaceDir);
   const realWorkspace = fs.realpathSync(normalizedWorkspace);
-  const safeCandidateDirs = candidateDirs.filter(
-    candidateDir => candidateDir === normalizedWorkspace || candidateDir.startsWith(normalizedWorkspace + path.sep)
+  const safeCandidateDirs = candidateDirs.filter(candidateDir =>
+    isPathWithinDirectory(normalizedWorkspace, candidateDir)
   );
   let fallbackCandidateDir = null;
 
   for (const candidateDir of safeCandidateDirs) {
     if (fs.existsSync(candidateDir)) {
       const realCandidateDir = fs.realpathSync(candidateDir);
-      if (realCandidateDir === realWorkspace || realCandidateDir.startsWith(realWorkspace + path.sep)) {
+      if (isPathWithinDirectory(realWorkspace, realCandidateDir)) {
         return candidateDir;
       }
     } else if (!fallbackCandidateDir) {
@@ -164,14 +178,14 @@ export function resolveLocalReusableWorkflowPath(uses, workspaceDir) {
   const normalizedWorkspace = path.resolve(workspaceDir);
 
   for (const candidatePath of candidatePaths) {
-    if (candidatePath.startsWith(normalizedWorkspace + path.sep) && fs.existsSync(candidatePath)) {
+    if (isPathWithinDirectory(normalizedWorkspace, candidatePath) && fs.existsSync(candidatePath)) {
       return candidatePath;
     }
   }
 
   // Ensure fallback is also within workspace to prevent path traversal
   const fallback = candidatePaths[0];
-  if (!fallback.startsWith(normalizedWorkspace + path.sep)) {
+  if (!isPathWithinDirectory(normalizedWorkspace, fallback)) {
     return null;
   }
   return fallback;
