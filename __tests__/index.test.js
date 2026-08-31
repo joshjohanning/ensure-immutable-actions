@@ -45,6 +45,7 @@ const {
   default: run,
   parseActionReference,
   shouldExcludeAction,
+  extractActionsFromRootAction,
   extractActionsFromWorkflow,
   expandActionReferences,
   expandRemoteReference,
@@ -263,6 +264,55 @@ describe('Ensure Immutable Actions', () => {
       const resolved = resolveLocalActionDirectory('./', workspaceDir, workspaceDir);
 
       expect(resolved).toBe(rootActionDir);
+
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+    });
+  });
+
+  describe('extractActionsFromRootAction', () => {
+    test('should extract references from root action.yaml metadata', () => {
+      const workspaceDir = '/tmp/test-root-action-yaml';
+      fs.mkdirSync(workspaceDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(workspaceDir, 'action.yaml'),
+        `
+name: Root Composite
+runs:
+  using: composite
+  steps:
+    - name: Nested action
+      uses: owner/action@v1
+`
+      );
+
+      const actions = extractActionsFromRootAction(workspaceDir);
+
+      expect(actions).toHaveLength(1);
+      expect(actions[0]).toMatchObject({
+        uses: 'owner/action@v1',
+        workflowFile: 'action.yaml',
+        sourceWorkflowFile: 'action.yaml',
+        stepName: 'Nested action',
+        supported: true
+      });
+
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+    });
+
+    test('should ignore root metadata without composite steps', () => {
+      const workspaceDir = '/tmp/test-root-node-action';
+      fs.mkdirSync(workspaceDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(workspaceDir, 'action.yml'),
+        `
+name: Root Node Action
+runs:
+  using: node24
+  main: dist/index.js
+`
+      );
+
+      expect(extractActionsFromRootAction(workspaceDir)).toEqual([]);
 
       fs.rmSync(workspaceDir, { recursive: true, force: true });
     });
@@ -2283,8 +2333,107 @@ jobs:
 
       await run();
 
-      expect(mockCore.warning).toHaveBeenCalledWith(expect.stringContaining('No workflow files found'));
+      expect(mockCore.warning).toHaveBeenCalledWith(
+        expect.stringContaining('No workflow files or root action metadata found')
+      );
       expect(mockCore.setOutput).toHaveBeenCalledWith('all-passed', true);
+    });
+
+    test('should scan root action metadata when no workflow references it', async () => {
+      fs.rmSync(testWorkflowsDir, { recursive: true, force: true });
+      fs.writeFileSync(
+        path.join(testWorkspaceDir, 'action.yml'),
+        `
+name: Root Composite
+runs:
+  using: composite
+  steps:
+    - uses: owner/action@1234567890abcdef1234567890abcdef12345678
+`
+      );
+      mockOctokit.rest.repos.getContent.mockResolvedValue({
+        data: {
+          type: 'file',
+          encoding: 'base64',
+          content: Buffer.from(
+            `
+name: Nested Node Action
+runs:
+  using: node24
+  main: dist/index.js
+`,
+            'utf8'
+          ).toString('base64')
+        }
+      });
+
+      await run();
+
+      const checkedCall = mockCore.setOutput.mock.calls.find(c => c[0] === 'workflows-checked');
+      expect(JSON.parse(checkedCall[1])).toEqual(['action.yml']);
+      const immutableCall = mockCore.setOutput.mock.calls.find(c => c[0] === 'immutable-actions');
+      expect(JSON.parse(immutableCall[1])).toEqual([
+        expect.objectContaining({
+          uses: 'owner/action@1234567890abcdef1234567890abcdef12345678',
+          sourceWorkflowFile: 'action.yml'
+        })
+      ]);
+      expect(mockCore.setOutput).toHaveBeenCalledWith('all-passed', true);
+    });
+
+    test('should not scan root action metadata twice when a workflow references ./', async () => {
+      fs.writeFileSync(
+        path.join(testWorkflowsDir, 'ci.yml'),
+        `
+name: CI
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./
+`
+      );
+      fs.writeFileSync(
+        path.join(testWorkspaceDir, 'action.yml'),
+        `
+name: Root Composite
+runs:
+  using: composite
+  steps:
+    - uses: owner/action@1234567890abcdef1234567890abcdef12345678
+`
+      );
+      mockOctokit.rest.repos.getContent.mockResolvedValue({
+        data: {
+          type: 'file',
+          encoding: 'base64',
+          content: Buffer.from(
+            `
+name: Nested Node Action
+runs:
+  using: node24
+  main: dist/index.js
+`,
+            'utf8'
+          ).toString('base64')
+        }
+      });
+
+      await run();
+
+      const checkedCall = mockCore.setOutput.mock.calls.find(c => c[0] === 'workflows-checked');
+      expect(JSON.parse(checkedCall[1])).toEqual(['ci.yml']);
+      const immutableCall = mockCore.setOutput.mock.calls.find(c => c[0] === 'immutable-actions');
+      const immutableOutput = JSON.parse(immutableCall[1]);
+      expect(immutableOutput).toHaveLength(1);
+      expect(immutableOutput[0]).toMatchObject({
+        uses: 'owner/action@1234567890abcdef1234567890abcdef12345678',
+        sourceWorkflowFile: 'ci.yml'
+      });
+      expect(mockCore.info).toHaveBeenCalledWith(
+        'Root action metadata already scanned through a local action reference'
+      );
     });
 
     test('should not write summary when write-job-summary is false', async () => {
