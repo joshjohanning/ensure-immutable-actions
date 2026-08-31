@@ -42,11 +42,11 @@ The action generates a report organized by workflow, making it easy to identify 
 
 **Actions:** 0 excluded, 1 immutable, 2 mutable
 
-| Action                                                                             | Status       | Message                             |
-| ---------------------------------------------------------------------------------- | ------------ | ----------------------------------- |
-| [owner/secure-action@v2.0.0](https://github.com/owner/secure-action/tree/v2.0.0)   | ✅ Immutable | Immutable release                   |
-| [owner/mutable-action@v1](https://github.com/owner/mutable-action/tree/v1)         | ❌ Mutable   | No release found for this reference |
-| [owner/another-action@v2.1.0](https://github.com/owner/another-action/tree/v2.1.0) | ❌ Mutable   | Mutable release                     |
+| Action                                                                             | Status       | Suggested Pin                                       | Message                             |
+| ---------------------------------------------------------------------------------- | ------------ | --------------------------------------------------- | ----------------------------------- |
+| [owner/secure-action@v2.0.0](https://github.com/owner/secure-action/tree/v2.0.0)   | ✅ Immutable |                                                     | Immutable release                   |
+| [owner/mutable-action@v1](https://github.com/owner/mutable-action/tree/v1)         | ❌ Mutable   | `0123456789abcdef0123456789abcdef01234567` # v1.2.3 | No release found for this reference |
+| [owner/another-action@v2.1.0](https://github.com/owner/another-action/tree/v2.1.0) | ❌ Mutable   | `89abcdef0123456789abcdef0123456789abcdef` # v2.1.0 | Mutable release                     |
 
 ## Usage
 
@@ -128,12 +128,13 @@ Patterns containing `/` match the full workflow path without the `@ref`, which l
 | `exclude-workflows`   | Workflow files to exclude from checks (comma-separated filenames or glob patterns, e.g., `experimental-*.yml`). Patterns containing `/` match the full workflow path without the `@ref`, e.g., `owner/repo/.github/workflows/ci.yml`.          | No       | -                     |
 | `include-first-party` | Include first-party actions (`actions/*`, `github/*`, `octokit/*`) in immutability checks. When `true`, first-party actions are also checked and appear in `mutable-actions`/`immutable-actions` outputs in addition to `first-party-actions`. | No       | `false`               |
 | `write-job-summary`   | Controls job summary output: `true` (always write), `false` (never write), or `on-failure-only` (write only when mutable/unsupported references are found).                                                                                    | No       | `true`                |
+| `suggest-pins`        | Resolve suggested full commit SHA pins for mutable actions. Suggestions appear in `mutable-actions` and in the job summary when it is written.                                                                                                 | No       | `true`                |
 
 ## Outputs
 
 | Output                | Description                                                                                                  |
 | --------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `mutable-actions`     | JSON array of actions using mutable releases                                                                 |
+| `mutable-actions`     | JSON array of actions using mutable releases, including `suggestedPin` details when available and enabled    |
 | `immutable-actions`   | JSON array of actions using immutable releases                                                               |
 | `unsupported-actions` | JSON array of action references that were found but not analyzed because their reference type is unsupported |
 | `first-party-actions` | JSON array of all first-party actions with `allowed` and `message` fields indicating their status.           |
@@ -165,6 +166,16 @@ Patterns containing `/` match the full workflow path without the `@ref`, which l
   with:
     write-job-summary: on-failure-only
 ```
+
+### Disable suggested pins
+
+```yaml
+- uses: joshjohanning/ensure-immutable-actions@v2
+  with:
+    suggest-pins: false
+```
+
+When enabled, the action first resolves the referenced tag itself. For branch-like references, it suggests the latest stable release, falling back to the newest prerelease when no stable release exists. If a suggestion cannot be resolved, the action warns and leaves it blank.
 
 ### Check only CI/CD workflows
 

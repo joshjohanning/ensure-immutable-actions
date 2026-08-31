@@ -1046,6 +1046,96 @@ export function formatTraversalHint(action) {
 }
 
 /**
+ * Resolve a Git reference to a full commit SHA
+ * @param {Octokit} octokit - Octokit instance
+ * @param {string} owner - Repository owner
+ * @param {string} repo - Repository name
+ * @param {string} ref - Git reference
+ * @returns {Promise<string>} Full commit SHA
+ */
+export async function resolveRefToCommitSHA(octokit, owner, repo, ref) {
+  const { data } = await octokit.rest.repos.getCommit({ owner, repo, ref });
+  return data.sha;
+}
+
+/**
+ * Resolve a recommended immutable pin for a mutable action
+ * @param {Octokit} octokit - Octokit instance
+ * @param {Object} action - Mutable action reference
+ * @returns {Promise<Object|null>} Suggested pin details or null when unavailable
+ */
+export async function resolveSuggestedPin(octokit, action) {
+  const { owner, repo, ref } = action;
+
+  try {
+    const sha = await resolveRefToCommitSHA(octokit, owner, repo, ref);
+    const { data: matchingRelease } = await octokit.rest.repos.getReleaseByTag({
+      owner,
+      repo,
+      tag: ref
+    });
+    return { sha, tag: matchingRelease.tag_name || ref, source: 'referenced-tag' };
+  } catch (error) {
+    if (error.status !== 404) {
+      core.warning(`Unable to resolve suggested pin for ${owner}/${repo}@${ref}: ${error.message}`);
+      return null;
+    }
+  }
+
+  let release;
+  try {
+    const { data } = await octokit.rest.repos.getLatestRelease({ owner, repo });
+    release = data;
+  } catch (error) {
+    if (error.status !== 404) {
+      core.warning(`Unable to resolve latest release for ${owner}/${repo}: ${error.message}`);
+      return null;
+    }
+
+    try {
+      const { data: releases } = await octokit.rest.repos.listReleases({
+        owner,
+        repo,
+        per_page: 1
+      });
+      release = releases[0];
+    } catch (listError) {
+      core.warning(`Unable to list releases for ${owner}/${repo}: ${listError.message}`);
+      return null;
+    }
+  }
+
+  if (!release?.tag_name) {
+    core.warning(`No releases available to suggest a pin for ${owner}/${repo}@${ref}`);
+    return null;
+  }
+
+  try {
+    const sha = await resolveRefToCommitSHA(octokit, owner, repo, release.tag_name);
+    return {
+      sha,
+      tag: release.tag_name,
+      source: release.prerelease ? 'latest-prerelease' : 'latest-release'
+    };
+  } catch (error) {
+    core.warning(`Unable to resolve release tag ${owner}/${repo}@${release.tag_name}: ${error.message}`);
+    return null;
+  }
+}
+
+/**
+ * Format a suggested pin for the job summary
+ * @param {Object|null} suggestedPin - Suggested pin details
+ * @returns {string} Markdown table cell value
+ */
+export function formatSuggestedPin(suggestedPin) {
+  if (!suggestedPin) {
+    return '';
+  }
+  return `\`${suggestedPin.sha}\` # ${suggestedPin.tag}`;
+}
+
+/**
  * Check if a release is immutable via GitHub API
  * Note: The 'immutable' property is a GitHub feature that indicates whether a release
  * can be modified or deleted. This only applies to tag-based releases.
@@ -1112,7 +1202,7 @@ export async function checkReleaseImmutability(octokit, owner, repo, ref) {
  * @param {boolean} includeFirstParty - Whether to include first-party actions in checks
  * @returns {Promise<Object>} { mutable: Array, immutable: Array, unsupported: Array, firstParty: Array, byWorkflow: Object }
  */
-export async function checkAllActions(octokit, actions, includeFirstParty = false) {
+export async function checkAllActions(octokit, actions, includeFirstParty = false, suggestPins = true) {
   const mutable = [];
   const immutable = [];
   const unsupported = [];
@@ -1130,6 +1220,7 @@ export async function checkAllActions(octokit, actions, includeFirstParty = fals
 
   // Create a cache for immutability results
   const immutabilityCache = new Map();
+  const suggestedPinCache = new Map();
 
   // Process unsupported actions - deduplicate by uses string
   const uniqueUnsupportedActions = Array.from(new Map(unsupportedActions.map(a => [getActionCacheKey(a), a])).values());
@@ -1183,6 +1274,13 @@ export async function checkAllActions(octokit, actions, includeFirstParty = fals
     core.info(`Checking ${formatActionReferenceText(action)}...`);
 
     const result = await checkReleaseImmutability(octokit, action.owner, action.repo, action.ref);
+    if (!result.immutable && suggestPins) {
+      const suggestionKey = `${action.owner}/${action.repo}@${action.ref}`;
+      if (!suggestedPinCache.has(suggestionKey)) {
+        suggestedPinCache.set(suggestionKey, await resolveSuggestedPin(octokit, action));
+      }
+      result.suggestedPin = suggestedPinCache.get(suggestionKey);
+    }
     immutabilityCache.set(getActionCacheKey(action), result);
 
     const actionInfo = {
@@ -1325,6 +1423,7 @@ export async function run() {
     const githubToken = core.getInput('github-token');
     const failOnMutable = core.getBooleanInput('fail-on-mutable');
     const includeFirstParty = core.getBooleanInput('include-first-party');
+    const suggestPins = core.getBooleanInput('suggest-pins');
     const writeJobSummary = core.getInput('write-job-summary').trim();
     const workflowsInput = core.getInput('workflows');
     const excludeWorkflowsInput = core.getInput('exclude-workflows');
@@ -1345,6 +1444,7 @@ export async function run() {
     core.info('Starting Ensure Immutable Actions...');
     core.info(`Fail on mutable: ${failOnMutable}`);
     core.info(`Include first-party: ${includeFirstParty}`);
+    core.info(`Suggest pins: ${suggestPins}`);
     core.info(`Write job summary: ${writeJobSummary}`);
 
     // Get workspace directory
@@ -1425,7 +1525,8 @@ export async function run() {
     const { mutable, immutable, unsupported, firstParty, byWorkflow } = await checkAllActions(
       octokit,
       expandedActions,
-      includeFirstParty
+      includeFirstParty,
+      suggestPins
     );
 
     // Set outputs
@@ -1486,26 +1587,38 @@ export async function run() {
           );
 
           // Build markdown table
-          let markdownTable = '| Action | Status | Message / Found In |\n';
-          markdownTable += '|--------|--------|--------------------|\n';
+          let markdownTable = suggestPins
+            ? '| Action | Status | Suggested Pin | Message / Found In |\n'
+            : '| Action | Status | Message / Found In |\n';
+          markdownTable += suggestPins
+            ? '|--------|--------|---------------|--------------------|\n'
+            : '|--------|--------|--------------------|\n';
 
           // Iterate each category separately so status reflects check results, not just isFirstParty flag
           for (const action of workflowData.firstParty) {
             const actionRef = formatActionReference(action.owner, action.repo, action.ref, action.actionPath);
-            markdownTable += `| ${actionRef} | ✅ First-party | ${action.message} |\n`;
+            markdownTable += suggestPins
+              ? `| ${actionRef} | ✅ First-party |  | ${action.message} |\n`
+              : `| ${actionRef} | ✅ First-party | ${action.message} |\n`;
           }
           for (const action of workflowData.immutable) {
             const actionRef = formatActionReference(action.owner, action.repo, action.ref, action.actionPath);
-            markdownTable += `| ${actionRef} | ✅ Immutable | ${action.message} |\n`;
+            markdownTable += suggestPins
+              ? `| ${actionRef} | ✅ Immutable |  | ${action.message} |\n`
+              : `| ${actionRef} | ✅ Immutable | ${action.message} |\n`;
           }
           for (const action of workflowData.mutable) {
             const actionRef = formatActionReference(action.owner, action.repo, action.ref, action.actionPath);
             const message = formatSummaryMessage(action.message, action.sourceLocations, true);
-            markdownTable += `| ${actionRef} | ❌ Mutable | ${message} |\n`;
+            markdownTable += suggestPins
+              ? `| ${actionRef} | ❌ Mutable | ${formatSuggestedPin(action.suggestedPin)} | ${message} |\n`
+              : `| ${actionRef} | ❌ Mutable | ${message} |\n`;
           }
           for (const action of workflowData.unsupported) {
             const message = formatSummaryMessage(action.message, action.sourceLocations, true);
-            markdownTable += `| ${action.uses} | ⚠️ Unsupported | ${message} |\n`;
+            markdownTable += suggestPins
+              ? `| ${action.uses} | ⚠️ Unsupported |  | ${message} |\n`
+              : `| ${action.uses} | ⚠️ Unsupported | ${message} |\n`;
           }
 
           summary = summary.addRaw(markdownTable).addRaw('\n');

@@ -29,6 +29,9 @@ const mockOctokit = {
   rest: {
     repos: {
       getReleaseByTag: jest.fn(),
+      getLatestRelease: jest.fn(),
+      listReleases: jest.fn(),
+      getCommit: jest.fn(),
       getContent: jest.fn()
     }
   }
@@ -53,6 +56,7 @@ const {
   formatActionReference,
   formatSourceLocationLink,
   formatSummaryMessage,
+  formatSuggestedPin,
   formatTraversalHint,
   getUnsupportedReference,
   getWorkflowFiles,
@@ -62,6 +66,7 @@ const {
   resolveLocalActionDirectory,
   resolveLocalReusableWorkflowPath,
   checkReleaseImmutability,
+  resolveSuggestedPin,
   checkAllActions,
   isFullSHA,
   getActionCacheKey,
@@ -74,6 +79,9 @@ describe('Ensure Immutable Actions', () => {
 
     // Reset Octokit mock
     mockOctokit.rest.repos.getReleaseByTag.mockClear();
+    mockOctokit.rest.repos.getLatestRelease.mockClear();
+    mockOctokit.rest.repos.listReleases.mockClear();
+    mockOctokit.rest.repos.getCommit.mockClear();
     mockOctokit.rest.repos.getContent.mockClear();
 
     // Set default inputs
@@ -1134,6 +1142,114 @@ jobs:
     beforeEach(() => {
       savedEnv.GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY;
       savedEnv.GITHUB_SHA = process.env.GITHUB_SHA;
+    });
+
+    describe('suggested pins', () => {
+      test('should format a suggested pin for the job summary', () => {
+        expect(
+          formatSuggestedPin({
+            sha: '1234567890abcdef1234567890abcdef12345678',
+            tag: 'v1.2.3'
+          })
+        ).toBe('`1234567890abcdef1234567890abcdef12345678` # v1.2.3');
+        expect(formatSuggestedPin(null)).toBe('');
+      });
+
+      test('should resolve the referenced release tag to a commit SHA', async () => {
+        mockOctokit.rest.repos.getCommit.mockResolvedValue({
+          data: { sha: '1234567890abcdef1234567890abcdef12345678' }
+        });
+        mockOctokit.rest.repos.getReleaseByTag.mockResolvedValue({
+          data: { tag_name: 'v1.2.3' }
+        });
+
+        await expect(
+          resolveSuggestedPin(mockOctokit, {
+            owner: 'owner',
+            repo: 'repo',
+            ref: 'v1.2.3'
+          })
+        ).resolves.toEqual({
+          sha: '1234567890abcdef1234567890abcdef12345678',
+          tag: 'v1.2.3',
+          source: 'referenced-tag'
+        });
+        expect(mockOctokit.rest.repos.getLatestRelease).not.toHaveBeenCalled();
+      });
+
+      test('should fall back to the latest stable release for a branch reference', async () => {
+        const notFound = Object.assign(new Error('Not Found'), { status: 404 });
+        mockOctokit.rest.repos.getCommit
+          .mockRejectedValueOnce(notFound)
+          .mockResolvedValueOnce({ data: { sha: 'abcdef1234567890abcdef1234567890abcdef12' } });
+        mockOctokit.rest.repos.getLatestRelease.mockResolvedValue({
+          data: { tag_name: 'v2.0.0', prerelease: false }
+        });
+
+        await expect(
+          resolveSuggestedPin(mockOctokit, {
+            owner: 'owner',
+            repo: 'repo',
+            ref: 'main'
+          })
+        ).resolves.toEqual({
+          sha: 'abcdef1234567890abcdef1234567890abcdef12',
+          tag: 'v2.0.0',
+          source: 'latest-release'
+        });
+      });
+
+      test('should use the newest prerelease when no stable release exists', async () => {
+        const notFound = Object.assign(new Error('Not Found'), { status: 404 });
+        mockOctokit.rest.repos.getCommit
+          .mockRejectedValueOnce(notFound)
+          .mockResolvedValueOnce({ data: { sha: 'fedcba0987654321fedcba0987654321fedcba09' } });
+        mockOctokit.rest.repos.getLatestRelease.mockRejectedValue(notFound);
+        mockOctokit.rest.repos.listReleases.mockResolvedValue({
+          data: [{ tag_name: 'v3.0.0-rc.1', prerelease: true }]
+        });
+
+        await expect(
+          resolveSuggestedPin(mockOctokit, {
+            owner: 'owner',
+            repo: 'repo',
+            ref: 'next'
+          })
+        ).resolves.toEqual({
+          sha: 'fedcba0987654321fedcba0987654321fedcba09',
+          tag: 'v3.0.0-rc.1',
+          source: 'latest-prerelease'
+        });
+      });
+
+      test('should warn and return null when no releases are available', async () => {
+        const notFound = Object.assign(new Error('Not Found'), { status: 404 });
+        mockOctokit.rest.repos.getCommit.mockRejectedValue(notFound);
+        mockOctokit.rest.repos.getLatestRelease.mockRejectedValue(notFound);
+        mockOctokit.rest.repos.listReleases.mockResolvedValue({ data: [] });
+
+        await expect(
+          resolveSuggestedPin(mockOctokit, {
+            owner: 'owner',
+            repo: 'repo',
+            ref: 'main'
+          })
+        ).resolves.toBeNull();
+        expect(mockCore.warning).toHaveBeenCalledWith('No releases available to suggest a pin for owner/repo@main');
+      });
+
+      test('should warn and return null on an API failure', async () => {
+        mockOctokit.rest.repos.getCommit.mockRejectedValue(Object.assign(new Error('Forbidden'), { status: 403 }));
+
+        await expect(
+          resolveSuggestedPin(mockOctokit, {
+            owner: 'owner',
+            repo: 'repo',
+            ref: 'main'
+          })
+        ).resolves.toBeNull();
+        expect(mockCore.warning).toHaveBeenCalledWith('Unable to resolve suggested pin for owner/repo@main: Forbidden');
+      });
     });
 
     afterEach(() => {
@@ -2232,7 +2348,10 @@ jobs:
       });
 
       mockOctokit.rest.repos.getReleaseByTag.mockResolvedValue({
-        data: { immutable: false }
+        data: { immutable: false, tag_name: 'v1' }
+      });
+      mockOctokit.rest.repos.getCommit.mockResolvedValue({
+        data: { sha: '1234567890abcdef1234567890abcdef12345678' }
       });
 
       await run();
@@ -2240,6 +2359,35 @@ jobs:
       expect(mockCore.setOutput).toHaveBeenCalledWith('all-passed', false);
       expect(mockCore.setFailed).toHaveBeenCalled();
       expect(mockCore.summary.addRaw).toHaveBeenCalledWith('# ❌ Immutable Actions Check - Failed\n\n');
+      const mutableCall = mockCore.setOutput.mock.calls.find(c => c[0] === 'mutable-actions');
+      expect(JSON.parse(mutableCall[1])[0].suggestedPin).toEqual({
+        sha: '1234567890abcdef1234567890abcdef12345678',
+        tag: 'v1',
+        source: 'referenced-tag'
+      });
+      expect(mockCore.summary.addRaw).toHaveBeenCalledWith(expect.stringContaining('| Suggested Pin |'));
+      expect(mockCore.summary.addRaw).toHaveBeenCalledWith(
+        expect.stringContaining('`1234567890abcdef1234567890abcdef12345678` # v1')
+      );
+    });
+
+    test('should skip suggested pin resolution and summary column when disabled', async () => {
+      mockCore.getBooleanInput.mockImplementation(name => {
+        if (name === 'fail-on-mutable') return false;
+        if (name === 'include-first-party') return false;
+        if (name === 'suggest-pins') return false;
+        return true;
+      });
+      mockOctokit.rest.repos.getReleaseByTag.mockResolvedValue({
+        data: { immutable: false }
+      });
+
+      await run();
+
+      expect(mockOctokit.rest.repos.getCommit).not.toHaveBeenCalled();
+      const mutableCall = mockCore.setOutput.mock.calls.find(c => c[0] === 'mutable-actions');
+      expect(JSON.parse(mutableCall[1])[0]).not.toHaveProperty('suggestedPin');
+      expect(mockCore.summary.addRaw).not.toHaveBeenCalledWith(expect.stringContaining('| Suggested Pin |'));
     });
 
     test('should not fail with mutable actions when fail-on-mutable is false', async () => {
@@ -2490,7 +2638,11 @@ jobs:
       await run();
 
       // First-party action should be API-checked
-      expect(mockOctokit.rest.repos.getReleaseByTag).toHaveBeenCalledTimes(1);
+      expect(mockOctokit.rest.repos.getReleaseByTag).toHaveBeenCalledWith({
+        owner: 'actions',
+        repo: 'checkout',
+        tag: 'v4'
+      });
 
       // Should fail since the first-party action has a mutable release
       expect(mockCore.setOutput).toHaveBeenCalledWith('all-passed', false);
