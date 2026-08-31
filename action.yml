@@ -1,5 +1,5 @@
 name: 'Ensure Immutable Actions'
-description: 'Validates third-party actions in your workflows are using immutable releases'
+description: 'Validates that third-party actions in workflows and root action metadata use immutable releases'
 
 branding:
   icon: 'shield'
@@ -19,7 +19,7 @@ inputs:
     required: false
     default: 'true'
   workflows:
-    description: 'Specific workflow files to check (comma-separated filenames or glob patterns, e.g., ci.yml,deploy-*.yml). If not specified, checks ALL workflows in .github/workflows/'
+    description: 'Specific workflow files to check (comma-separated filenames or glob patterns, e.g., ci.yml,deploy-*.yml). If not specified, checks ALL workflows in .github/workflows/. Repository-root action.yml/action.yaml metadata is also checked when present, unless a selected workflow already references it via a local action path.'
     required: false
   exclude-workflows:
     description: 'Workflow files to exclude from checks (comma-separated filenames or glob patterns, e.g., experimental-*.yml). Patterns containing / match the full workflow path without the @ref, e.g., owner/repo/.github/workflows/ci.yml. Applies even when workflows is specified and during recursive traversal of reusable workflows'
@@ -49,7 +49,7 @@ outputs:
   all-passed:
     description: 'Boolean indicating if all checks passed'
   workflows-checked:
-    description: 'List of workflow files that were checked'
+    description: 'List of workflow and repository-root action metadata files that were checked as scan entrypoints. Root metadata uses a ./ prefix to distinguish it from same-named workflows.'
 
 runs:
   using: 'node24'
