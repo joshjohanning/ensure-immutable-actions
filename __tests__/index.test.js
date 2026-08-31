@@ -42,8 +42,9 @@ const mockOctokit = {
 
 // Mock the modules before importing the main module
 jest.unstable_mockModule('@actions/core', () => mockCore);
+const MockOctokit = jest.fn(() => mockOctokit);
 jest.unstable_mockModule('@octokit/rest', () => ({
-  Octokit: jest.fn(() => mockOctokit)
+  Octokit: MockOctokit
 }));
 
 // Import the main module and helper functions after mocking
@@ -68,6 +69,7 @@ const {
   isReusableWorkflowReference,
   resolveLocalActionDirectory,
   resolveLocalReusableWorkflowPath,
+  normalizeGitRef,
   checkReleaseImmutability,
   resolveSuggestedPin,
   checkAllActions,
@@ -97,6 +99,7 @@ describe('Ensure Immutable Actions', () => {
     mockCore.getInput.mockImplementation(name => {
       const inputs = {
         'github-token': 'test-token',
+        'github-api-url': 'https://api.github.com',
         'write-job-summary': 'true',
         workflows: '',
         'exclude-workflows': ''
@@ -1185,6 +1188,39 @@ jobs:
           source: 'referenced-release'
         });
         expect(mockOctokit.rest.repos.getLatestRelease).not.toHaveBeenCalled();
+      });
+
+      test('should normalize fully-qualified tag and branch refs', () => {
+        expect(normalizeGitRef('refs/tags/v1')).toBe('v1');
+        expect(normalizeGitRef('refs/heads/main')).toBe('main');
+        expect(normalizeGitRef('v2')).toBe('v2');
+      });
+
+      test('should resolve a fully-qualified tag using its short name', async () => {
+        mockOctokit.rest.git.getRef.mockResolvedValue({ data: { ref: 'refs/tags/v1' } });
+        mockOctokit.rest.repos.getCommit.mockResolvedValue({
+          data: { sha: '1234567890abcdef1234567890abcdef12345678' }
+        });
+        mockOctokit.rest.repos.getReleaseByTag.mockResolvedValue({
+          data: { tag_name: 'v1' }
+        });
+
+        await resolveSuggestedPin(mockOctokit, {
+          owner: 'owner',
+          repo: 'repo',
+          ref: 'refs/tags/v1'
+        });
+
+        expect(mockOctokit.rest.git.getRef).toHaveBeenCalledWith({
+          owner: 'owner',
+          repo: 'repo',
+          ref: 'tags/v1'
+        });
+        expect(mockOctokit.rest.repos.getCommit).toHaveBeenCalledWith({
+          owner: 'owner',
+          repo: 'repo',
+          ref: 'v1'
+        });
       });
 
       test('should resolve a referenced tag without a GitHub release', async () => {
@@ -2370,6 +2406,10 @@ jobs:
 
       await run();
 
+      expect(MockOctokit).toHaveBeenCalledWith({
+        auth: 'test-token',
+        baseUrl: 'https://api.github.com'
+      });
       expect(mockCore.setOutput).toHaveBeenCalledWith('all-passed', true);
       expect(mockCore.setOutput).toHaveBeenCalledWith('mutable-actions', expect.stringContaining('[]'));
       expect(mockCore.setFailed).not.toHaveBeenCalled();

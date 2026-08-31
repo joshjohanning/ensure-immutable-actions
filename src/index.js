@@ -1059,13 +1059,23 @@ export async function resolveRefToCommitSHA(octokit, owner, repo, ref) {
 }
 
 /**
+ * Normalize fully-qualified Git refs for API endpoints that expect a short ref
+ * @param {string} ref - Git reference
+ * @returns {string} Short tag or branch name
+ */
+export function normalizeGitRef(ref) {
+  return ref.replace(/^refs\/(?:tags|heads)\//, '');
+}
+
+/**
  * Resolve a recommended immutable pin for a mutable action
  * @param {Octokit} octokit - Octokit instance
  * @param {Object} action - Mutable action reference
  * @returns {Promise<Object|null>} Suggested pin details or null when unavailable
  */
 export async function resolveSuggestedPin(octokit, action) {
-  const { owner, repo, ref } = action;
+  const { owner, repo } = action;
+  const ref = normalizeGitRef(action.ref);
 
   let referencedTagExists = false;
   try {
@@ -1450,6 +1460,7 @@ export async function run() {
   try {
     // Get inputs
     const githubToken = core.getInput('github-token');
+    const githubApiUrl = core.getInput('github-api-url');
     const failOnMutable = core.getBooleanInput('fail-on-mutable');
     const includeFirstParty = core.getBooleanInput('include-first-party');
     const suggestPins = core.getBooleanInput('suggest-pins');
@@ -1537,7 +1548,7 @@ export async function run() {
     core.info(`Total action references found: ${allActions.length}`);
 
     // Initialize Octokit
-    const octokit = new Octokit({ auth: githubToken });
+    const octokit = new Octokit({ auth: githubToken, baseUrl: githubApiUrl });
 
     const skippedFirstPartyActions = includeFirstParty ? [] : allActions.filter(action => action.isFirstParty);
     const actionsToExpand = includeFirstParty ? allActions : allActions.filter(action => !action.isFirstParty);

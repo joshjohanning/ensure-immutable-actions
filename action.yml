@@ -10,6 +10,10 @@ inputs:
     description: 'GitHub token for API calls. The default github.token works for public repos. For recursion into private/internal repos, use a PAT or GitHub App token with contents: read scope.'
     required: true
     default: ${{ github.token }}
+  github-api-url:
+    description: 'GitHub REST API URL for GitHub.com, GHES, or GHEC-DR'
+    required: false
+    default: ${{ github.api_url }}
   fail-on-mutable:
     description: 'Fail the workflow if mutable actions are found'
     required: false
