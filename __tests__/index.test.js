@@ -252,6 +252,23 @@ describe('Ensure Immutable Actions', () => {
       fs.rmSync(workspaceDir, { recursive: true, force: true });
       fs.rmSync(outsideDir, { recursive: true, force: true });
     });
+
+    test('should reject reusable workflow symlinks that escape the workspace', () => {
+      const workspaceDir = fs.mkdtempSync('/tmp/test-resolve-workflow-symlink-');
+      const outsideDir = fs.mkdtempSync('/tmp/test-resolve-workflow-symlink-outside-');
+      const workflowsDir = path.join(workspaceDir, '.github', 'workflows');
+      const outsideWorkflow = path.join(outsideDir, 'reusable.yml');
+      const linkedWorkflow = path.join(workflowsDir, 'reusable.yml');
+
+      fs.mkdirSync(workflowsDir, { recursive: true });
+      fs.writeFileSync(outsideWorkflow, 'name: Outside Workflow');
+      fs.symlinkSync(outsideWorkflow, linkedWorkflow, 'file');
+
+      expect(resolveLocalReusableWorkflowPath('./.github/workflows/reusable.yml', workspaceDir)).toBeNull();
+
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+      fs.rmSync(outsideDir, { recursive: true, force: true });
+    });
   });
 
   describe('resolveLocalActionDirectory', () => {

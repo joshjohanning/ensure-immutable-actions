@@ -176,19 +176,25 @@ export function resolveLocalActionDirectory(uses, workspaceDir, baseDir) {
 export function resolveLocalReusableWorkflowPath(uses, workspaceDir) {
   const candidatePaths = [path.resolve(workspaceDir, uses)];
   const normalizedWorkspace = path.resolve(workspaceDir);
+  const realWorkspace = fs.realpathSync(normalizedWorkspace);
+  let fallbackCandidatePath = null;
 
   for (const candidatePath of candidatePaths) {
-    if (isPathWithinDirectory(normalizedWorkspace, candidatePath) && fs.existsSync(candidatePath)) {
-      return candidatePath;
+    if (!isPathWithinDirectory(normalizedWorkspace, candidatePath)) {
+      continue;
+    }
+
+    if (fs.existsSync(candidatePath)) {
+      const realCandidatePath = fs.realpathSync(candidatePath);
+      if (isPathWithinDirectory(realWorkspace, realCandidatePath)) {
+        return candidatePath;
+      }
+    } else if (!fallbackCandidatePath) {
+      fallbackCandidatePath = candidatePath;
     }
   }
 
-  // Ensure fallback is also within workspace to prevent path traversal
-  const fallback = candidatePaths[0];
-  if (!isPathWithinDirectory(normalizedWorkspace, fallback)) {
-    return null;
-  }
-  return fallback;
+  return fallbackCandidatePath;
 }
 
 /**
