@@ -283,6 +283,20 @@ describe('Ensure Immutable Actions', () => {
       fs.rmSync(workspaceDir, { recursive: true, force: true });
       fs.rmSync(outsideDir, { recursive: true, force: true });
     });
+
+    test('should reject local action symlinks that escape the workspace', () => {
+      const workspaceDir = fs.mkdtempSync('/tmp/test-resolve-local-action-symlink-');
+      const outsideDir = fs.mkdtempSync('/tmp/test-resolve-local-action-symlink-outside-');
+      const linkedActionDir = path.join(workspaceDir, 'linked-action');
+
+      fs.writeFileSync(path.join(outsideDir, 'action.yml'), 'name: Outside Action');
+      fs.symlinkSync(outsideDir, linkedActionDir, 'dir');
+
+      expect(resolveLocalActionDirectory('./linked-action', workspaceDir, workspaceDir)).toBeNull();
+
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+      fs.rmSync(outsideDir, { recursive: true, force: true });
+    });
   });
 
   describe('extractActionsFromRootAction', () => {

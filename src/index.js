@@ -133,17 +133,24 @@ export function findLocalActionMetadataFile(actionDir) {
 export function resolveLocalActionDirectory(uses, workspaceDir, baseDir) {
   const candidateDirs = [path.resolve(baseDir, uses), path.resolve(workspaceDir, uses)];
   const normalizedWorkspace = path.resolve(workspaceDir);
+  const realWorkspace = fs.realpathSync(normalizedWorkspace);
   const safeCandidateDirs = candidateDirs.filter(
     candidateDir => candidateDir === normalizedWorkspace || candidateDir.startsWith(normalizedWorkspace + path.sep)
   );
+  let fallbackCandidateDir = null;
 
   for (const candidateDir of safeCandidateDirs) {
     if (fs.existsSync(candidateDir)) {
-      return candidateDir;
+      const realCandidateDir = fs.realpathSync(candidateDir);
+      if (realCandidateDir === realWorkspace || realCandidateDir.startsWith(realWorkspace + path.sep)) {
+        return candidateDir;
+      }
+    } else if (!fallbackCandidateDir) {
+      fallbackCandidateDir = candidateDir;
     }
   }
 
-  return safeCandidateDirs[0] || null;
+  return fallbackCandidateDir;
 }
 
 /**
