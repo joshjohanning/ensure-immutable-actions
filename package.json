@@ -1,7 +1,7 @@
 {
   "name": "ensure-immutable-actions",
   "description": "🛡️ GitHub Action that validates third-party actions in workflows and action metadata use immutable releases",
-  "version": "2.7.0",
+  "version": "2.7.1",
   "type": "module",
   "author": {
     "name": "Josh Johanning",
